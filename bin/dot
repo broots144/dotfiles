@@ -58,9 +58,11 @@ while test $# -gt 0; do
 			;;
 		"-s"|"--sync")
 			syncBrewfile
+			exit
 			;;
 		"-p"|"--push")
 			pushToGithub
+			exit
 			;;
 		*)
 			echo "Invalid option: $1"
