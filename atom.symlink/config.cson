@@ -19,6 +19,8 @@
   "autocomplete-modules":
     babelPluginModuleResolver: true
     webpack: true
+  "autocomplete-python":
+    useKite: false
   core:
     closeDeletedFileTabs: true
     closeEmptyWindows: false
@@ -52,10 +54,11 @@
       "tmp"
       "vendor"
     ]
+    projectHome: "/Users/$USER/projects"
     telemetryConsent: "no"
     themes: [
-      "one-light-ui"
-      "one-light-syntax"
+      "one-dark-ui"
+      "atom-dark-syntax"
     ]
   editor:
     fontFamily: "Menlo"
