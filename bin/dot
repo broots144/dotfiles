@@ -9,6 +9,7 @@ set -e
 
 parentDirectory="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P)"
 dotfilesDirectory="$(cd "$( dirname "$parentDirectory" )" && pwd -P)"
+hostname="$(hostname -s)"
 
 displayUsageAndExit() {
 	echo "dot -- dotfiles management"
@@ -21,6 +22,30 @@ displayUsageAndExit() {
 	exit
 }
 
+syncBrewfile() {
+	echo "Syncing Brewfile with brew-bundle..."
+	current_dir=$PWD
+	cd /tmp
+	rm -rf Brewfile
+	brew bundle dump
+	mv -f $dotfilesDirectory/Brewfile $dotfilesDirectory/Brewfile-backup
+	mv -f /tmp/Brewfile $dotfilesDirectory/Brewfile
+	cd $current_dir
+	echo "Done"
+	exit
+}
+
+pushToGithub() {
+	echo "Committing and pushing to Github"
+	echo "Git commit message? "
+	read CommitMessage
+	git add .
+	git commit -m "Auto sync and Push from $hostname"
+	git push
+	echo "Done"
+	exit
+}
+
 while test $# -gt 0; do
 	case "$1" in
 		"-h"|"--help")
@@ -29,6 +54,12 @@ while test $# -gt 0; do
 		"-e"|"--edit")
 			exec "$EDITOR" "$dotfilesDirectory"
 			exit
+			;;
+		"-s"|"--sync")
+			syncBrewfile
+			;;
+		"-p"|"--push")
+			pushToGithub
 			;;
 		*)
 			echo "Invalid option: $1"
