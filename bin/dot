@@ -19,7 +19,7 @@ displayUsageAndExit() {
 	echo "Options:"
 	echo "  -e, --edit    Open dotfiles directory for editing"
 	echo "  -h, --help    Show this help message and exit"
-	echo "  -p, --push    Commits and pushes dotfiles to Github repo"
+	echo "  -p, --push    Syncs Brewfile and then commits and pushes dotfiles to Github repo"
 	echo "  -s, --sync    Syncs Brewfile with brew-bundle dump"
 	exit
 }
@@ -34,10 +34,10 @@ syncBrewfile() {
 	mv -f /tmp/Brewfile $dotfilesDirectory/Brewfile
 	cd $current_dir
 	echo "Done"
-	exit
 }
 
 pushToGithub() {
+	syncBrewfile
 	echo "Committing and pushing to Github"
 	git checkout master
 	git pull
@@ -45,7 +45,6 @@ pushToGithub() {
 	git commit -m "Auto sync and Push from $hostname"
 	git push
 	echo "Done"
-	exit
 }
 
 while test $# -gt 0; do
