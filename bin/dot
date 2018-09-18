@@ -19,6 +19,8 @@ displayUsageAndExit() {
 	echo "Options:"
 	echo "  -e, --edit    Open dotfiles directory for editing"
 	echo "  -h, --help    Show this help message and exit"
+	echo "  -p, --push    Commits and pushes dotfiles to Github repo"
+	echo "  -s, --sync    Syncs Brewfile with brew-bundle dump"
 	exit
 }
 
@@ -37,8 +39,6 @@ syncBrewfile() {
 
 pushToGithub() {
 	echo "Committing and pushing to Github"
-	echo "Git commit message? "
-	read CommitMessage
 	git add .
 	git commit -m "Auto sync and Push from $hostname"
 	git push

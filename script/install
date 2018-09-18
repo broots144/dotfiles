@@ -6,6 +6,39 @@ set -e
 
 cd "$(dirname $0)"/..
 
+setup_mas () {
+  if [ "$(brew list | grep mas)" != "mas" ]
+  then
+    info "installing mas"
+    brew install mas
+  fi
+
+
+  until (mas account > /dev/null); # If signed in, drop to outer "done"
+  do
+  # If here, not logged in
+
+    echo -e "You are not yet logged into the Mac App Store."
+    echo -e "I will launch the Mac App Store now."
+    echo -e "\nPlease log in to the Mac App Store..."
+    open -a "/Applications/App Store.app"
+
+  # until loop waits patiently until scriptrunner signs into Mac App Store
+    until (mas account > /dev/null);
+    do
+      sleep 3
+        echo -e "… zzz …."
+      done  
+  done
+  echo -e "You are signed into the Mac App Store."
+  signed_in_user=$(mas account)
+  echo -e "MAS user name: $signed_in_user"
+
+}
+
+# Setup MAS (https://github.com/mas-cli/mas)
+setup_mas
+
 # Run Homebrew through the Brewfile
 echo "› brew bundle"
 brew bundle
