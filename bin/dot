@@ -38,6 +38,8 @@ syncBrewfile() {
 
 pushToGithub() {
 	syncBrewfile
+	current_dir=$PWD
+	cd $dotfilesDirectory
 	echo "Committing and pushing to Github"
 	git checkout master
 	git pull
@@ -45,6 +47,7 @@ pushToGithub() {
 	git commit -m "Auto sync and Push from $hostname"
 	git push
 	echo "Done"
+	cd $current_dir
 }
 
 while test $# -gt 0; do
