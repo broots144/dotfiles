@@ -39,6 +39,8 @@ syncBrewfile() {
 
 pushToGithub() {
 	echo "Committing and pushing to Github"
+	git checkout master
+	git pull
 	git add .
 	git commit -m "Auto sync and Push from $hostname"
 	git push
