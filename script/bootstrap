@@ -152,6 +152,8 @@ then
     fail "error installing dependencies"
   fi
 
+  sudo dscl . -create /Users/$USER UserShell /usr/local/bin/zsh
+
 fi
 
 echo ''
