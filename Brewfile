@@ -1,4 +1,5 @@
 # CLI tools
+brew "grok"
 brew "hf"
 brew "gemini-cli"
 brew "openjdk"
