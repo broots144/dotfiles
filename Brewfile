@@ -1,4 +1,14 @@
 # CLI tools
+brew "openjdk"
+brew "node"
+brew "netbirdio/tap/netbird"
+brew "git-filter-repo"
+brew "ffmpeg"
+brew "docker-compose"
+brew "docker-buildx"
+brew "docker"
+brew "colima"
+brew "cocoapods"
 brew "keith/formulae/reminders-cli"
 brew "openssl"
 brew "git"
@@ -42,6 +52,8 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "flutter"
+cask "android-commandlinetools"
 cask "alfred"
 cask "caffeine"
 cask "ghostty"
