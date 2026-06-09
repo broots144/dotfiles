@@ -1,0 +1,143 @@
+#!/usr/bin/env zsh
+#
+# brew-reconcile — reconcile $ZSH/Brewfile against actually-installed Homebrew
+# state, then commit & push any drift.
+#
+# WHY THIS EXISTS
+# ---------------
+# The `brew` shell-function wrapper (functions/brew) keeps the Brewfile in sync
+# only for installs you run yourself in an interactive zsh session — it works by
+# shadowing the `brew` command. Anything that calls the real binary directly
+# (the Hermes agent, scripts, `brew bundle`, GUI-triggered installs) bypasses
+# the wrapper entirely, so those packages never make it into the Brewfile.
+#
+# This reconciler doesn't rely on interception. It diffs the *actual* installed
+# state against the Brewfile and surgically appends whatever is missing, then
+# commits & pushes. Run it on a schedule (LaunchAgent) and the Brewfile is
+# self-healing regardless of who installed what.
+#
+# It is ADD-ONLY by design. It never removes lines: the Brewfile legitimately
+# lists non-leaf formulae (e.g. openssl, ruby-build) that aren't "installed on
+# request", and a temporarily-uninstalled tool shouldn't be silently dropped.
+# Removal stays the wrapper's job (on explicit `brew uninstall`).
+#
+# Matching is by basename (tap/version prefixes stripped) and is alias-aware, so
+# a Brewfile `kubectl` is recognised as covering the installed `kubernetes-cli`.
+#
+# Usage:
+#   brew-reconcile             reconcile, commit & push
+#   brew-reconcile --dry-run   report drift, change nothing
+#   brew-reconcile --no-push   commit locally, skip the push
+#
+# Exit status: 0 on success (including "nothing to do"), non-zero on error.
+
+set -u
+emulate -L zsh
+setopt local_options no_nomatch pipefail
+
+ZSH="${ZSH:-$HOME/.dotfiles}"
+brewfile="$ZSH/Brewfile"
+
+dry_run=0 do_push=1
+for a in "$@"; do
+  case "$a" in
+    --dry-run) dry_run=1 ;;
+    --no-push) do_push=0 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    *) echo "brew-reconcile: unknown option: $a" >&2; exit 2 ;;
+  esac
+done
+
+command -v brew >/dev/null 2>&1 || { echo "brew-reconcile: brew not found in PATH" >&2; exit 1; }
+command -v jq   >/dev/null 2>&1 || { echo "brew-reconcile: jq not found in PATH" >&2; exit 1; }
+[[ -f "$brewfile" ]] || { echo "brew-reconcile: no Brewfile at $brewfile" >&2; exit 1; }
+
+# ---- index what the Brewfile already lists, by basename ---------------------
+typeset -A have_brew have_cask
+local line name
+while IFS= read -r line; do
+  case "$line" in
+    brew\ \"*) name="${line#brew \"}"; name="${name%%\"*}"; have_brew[${name:t}]=1 ;;
+    cask\ \"*) name="${line#cask \"}"; name="${name%%\"*}"; have_cask[${name:t}]=1 ;;
+  esac
+done < "$brewfile"
+
+# True if formula $1 (or any of its aliases/oldnames) is already in the Brewfile.
+brew_covered() {
+  [[ -n "${have_brew[${1:t}]:-}" ]] && return 0
+  local alt
+  for alt in $(brew info --json=v2 --formula "$1" 2>/dev/null \
+                 | jq -r '.formulae[0] | ([.full_name] + .aliases + .oldnames) | .[]' 2>/dev/null); do
+    [[ -n "${have_brew[${alt:t}]:-}" ]] && return 0
+  done
+  return 1
+}
+
+# ---- collect drift ----------------------------------------------------------
+local -a add_brew add_cask actions
+local pkg
+
+for pkg in $(brew leaves --installed-on-request 2>/dev/null); do
+  brew_covered "$pkg" || { add_brew+=("$pkg"); actions+=("add ${pkg:t}"); }
+done
+
+for pkg in $(brew list --cask 2>/dev/null); do
+  [[ -n "${have_cask[${pkg:t}]:-}" ]] || { add_cask+=("cask:$pkg"); actions+=("add ${pkg:t} (cask)"); }
+done
+
+if (( ${#actions} == 0 )); then
+  echo "brew-reconcile: Brewfile already in sync"
+  exit 0
+fi
+
+echo "brew-reconcile: drift detected (${#actions} item(s)):"
+printf '  + %s\n' "${actions[@]}"
+
+if (( dry_run )); then
+  echo "brew-reconcile: --dry-run, nothing written"
+  exit 0
+fi
+
+# ---- surgically insert under the right section header -----------------------
+insert_line() {
+  local hdr="$1" ins="$2" tmp
+  tmp="$(mktemp)" || return 1
+  awk -v hdr="$hdr" -v ins="$ins" '
+    { print }
+    !done && $0 == hdr { print ins; done=1 }
+    END { if (!done) print ins }
+  ' "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
+}
+
+for pkg in "${add_brew[@]}"; do
+  insert_line "# CLI tools" "brew \"$pkg\""
+done
+for pkg in "${add_cask[@]}"; do
+  insert_line "# Casks" "cask \"${pkg#cask:}\""
+done
+
+# ---- commit & push ----------------------------------------------------------
+if git -C "$ZSH" diff --quiet -- Brewfile; then
+  echo "brew-reconcile: no net change to Brewfile after edit"
+  exit 0
+fi
+
+local msg="brew: reconcile ${(j:, :)actions}"
+git -C "$ZSH" add Brewfile
+if git -C "$ZSH" commit -q -m "$msg"; then
+  echo "brew-reconcile: committed — $msg"
+else
+  echo "brew-reconcile: commit failed" >&2
+  exit 1
+fi
+
+if (( do_push )); then
+  if git -C "$ZSH" push -q; then
+    echo "brew-reconcile: pushed"
+  else
+    echo "brew-reconcile: push failed (retry later: git -C \"$ZSH\" push)" >&2
+    exit 1
+  fi
+fi
+
+exit 0

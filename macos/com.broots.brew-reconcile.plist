@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent: periodically reconcile the dotfiles Brewfile with installed brew
+  state so out-of-band installs (Hermes agent, scripts, GUI installers) get
+  captured even though they bypass the `brew` shell-function wrapper.
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.brew-reconcile</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.dotfiles/bin/brew-reconcile</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ZSH</key>
+        <string>__HOME__/.dotfiles</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- Run at load (login) and then every 30 minutes. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <!-- Don't pile up if a run overruns the interval. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/brew-reconcile.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/brew-reconcile.log</string>
+</dict>
+</plist>
