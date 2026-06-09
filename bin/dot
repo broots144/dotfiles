@@ -90,3 +90,7 @@ brew update
 # Install software
 echo "› $ZSH/script/install"
 $ZSH/script/install
+
+# Install/refresh LaunchAgents (e.g. the periodic Brewfile reconciler)
+echo "› $ZSH/macos/install-launchd.sh"
+$ZSH/macos/install-launchd.sh
