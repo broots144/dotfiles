@@ -42,6 +42,7 @@ brew "bandwhich"
 brew "rbenv"
 brew "ruby-build"
 brew "pyenv"
+brew "python@3.14"
 brew "uv"
 brew "fnm"
 
