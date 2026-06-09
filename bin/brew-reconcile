@@ -12,9 +12,11 @@
 # the wrapper entirely, so those packages never make it into the Brewfile.
 #
 # This reconciler doesn't rely on interception. It diffs the *actual* installed
-# state against the Brewfile and surgically appends whatever is missing, then
-# commits & pushes. Run it on a schedule (LaunchAgent) and the Brewfile is
-# self-healing regardless of who installed what.
+# state — Homebrew formulae, casks, AND Mac App Store apps (`mas list`, so
+# GUI-store installs like Xcode are captured) — against the Brewfile and
+# surgically appends whatever is missing, then commits & pushes. Run it on a
+# schedule (LaunchAgent) and the Brewfile is self-healing regardless of who
+# installed what.
 #
 # It is ADD-ONLY by design. It never removes lines: the Brewfile legitimately
 # lists non-leaf formulae (e.g. openssl, ruby-build) that aren't "installed on
@@ -52,13 +54,16 @@ command -v brew >/dev/null 2>&1 || { echo "brew-reconcile: brew not found in PAT
 command -v jq   >/dev/null 2>&1 || { echo "brew-reconcile: jq not found in PATH" >&2; exit 1; }
 [[ -f "$brewfile" ]] || { echo "brew-reconcile: no Brewfile at $brewfile" >&2; exit 1; }
 
-# ---- index what the Brewfile already lists, by basename ---------------------
-typeset -A have_brew have_cask
+# ---- index what the Brewfile already lists -----------------------------------
+# Formulae/casks are keyed by basename; mas apps by their App Store id (stable
+# even if the displayed name changes).
+typeset -A have_brew have_cask have_mas
 local line name
 while IFS= read -r line; do
   case "$line" in
     brew\ \"*) name="${line#brew \"}"; name="${name%%\"*}"; have_brew[${name:t}]=1 ;;
     cask\ \"*) name="${line#cask \"}"; name="${name%%\"*}"; have_cask[${name:t}]=1 ;;
+    mas\ *)    [[ "$line" =~ 'id:[[:space:]]*([0-9]+)' ]] && have_mas[${match[1]}]=1 ;;
   esac
 done < "$brewfile"
 
@@ -74,7 +79,7 @@ brew_covered() {
 }
 
 # ---- collect drift ----------------------------------------------------------
-local -a add_brew add_cask actions
+local -a add_brew add_cask add_mas actions
 local pkg
 
 for pkg in $(brew leaves --installed-on-request 2>/dev/null); do
@@ -84,6 +89,17 @@ done
 for pkg in $(brew list --cask 2>/dev/null); do
   [[ -n "${have_cask[${pkg:t}]:-}" ]] || { add_cask+=("cask:$pkg"); actions+=("add ${pkg:t} (cask)"); }
 done
+
+# Mac App Store apps. `mas list` prints: "<id>  <Name>  (<version>)". We key by
+# id and carry the name through for the Brewfile line. Skipped if mas is absent.
+if command -v mas >/dev/null 2>&1; then
+  local masline mid mname
+  for masline in "${(@f)$(mas list 2>/dev/null)}"; do
+    [[ "$masline" =~ '^([0-9]+)[[:space:]]+(.+[^[:space:]])[[:space:]]+\([^)]*\)[[:space:]]*$' ]] || continue
+    mid="${match[1]}"; mname="${match[2]}"
+    [[ -n "${have_mas[$mid]:-}" ]] || { add_mas+=("$mid:$mname"); actions+=("add $mname (mas)"); }
+  done
+fi
 
 if (( ${#actions} == 0 )); then
   echo "brew-reconcile: Brewfile already in sync"
@@ -114,6 +130,9 @@ for pkg in "${add_brew[@]}"; do
 done
 for pkg in "${add_cask[@]}"; do
   insert_line "# Casks" "cask \"${pkg#cask:}\""
+done
+for pkg in "${add_mas[@]}"; do
+  insert_line "# Mac App Store" "mas \"${pkg#*:}\", id: ${pkg%%:*}"
 done
 
 # ---- commit & push ----------------------------------------------------------
