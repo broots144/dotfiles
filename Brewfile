@@ -1,4 +1,5 @@
 # CLI tools
+brew "keith/formulae/reminders-cli"
 brew "openssl"
 brew "git"
 brew "gh"
