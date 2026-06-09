@@ -7,33 +7,47 @@ set -e
 cd "$(dirname $0)"/..
 
 setup_mas () {
-  if [ "$(brew list | grep mas)" != "mas" ]
+  if ! command -v mas > /dev/null 2>&1
   then
-    info "installing mas"
+    echo "installing mas"
     brew install mas
   fi
 
+  # mas 7+ removed the `account` subcommand (Apple dropped the CLI sign-in API),
+  # so we can neither verify nor trigger App Store sign-in from the CLI. The old
+  # `until (mas account)` loop spins forever on modern mas, so branch on version.
+  mas_major="$(mas version 2>/dev/null | cut -d. -f1)"
 
-  until (mas account > /dev/null); # If signed in, drop to outer "done"
+  if [ "${mas_major:-0}" -ge 7 ]
+  then
+    echo "Note: mas $(mas version) can't verify App Store sign-in from the CLI."
+    echo "Make sure you're signed into the App Store app; mas installs are skipped if not."
+    return 0
+  fi
+
+  # Older mas (<7): account check is supported. Wait for sign-in, but bounded so
+  # an unattended run can never hang.
+  if mas account > /dev/null 2>&1
+  then
+    echo "Signed into the Mac App Store as $(mas account)."
+    return 0
+  fi
+
+  echo "You are not signed into the Mac App Store. Opening App Store now..."
+  open -a "/Applications/App Store.app" || true
+
+  for _ in $(seq 1 20)
   do
-  # If here, not logged in
-
-    echo -e "You are not yet logged into the Mac App Store."
-    echo -e "I will launch the Mac App Store now."
-    echo -e "\nPlease log in to the Mac App Store..."
-    open -a "/Applications/App Store.app"
-
-  # until loop waits patiently until scriptrunner signs into Mac App Store
-    until (mas account > /dev/null);
-    do
-      sleep 3
-        echo -e "… zzz …."
-      done  
+    if mas account > /dev/null 2>&1
+    then
+      echo "Signed into the Mac App Store as $(mas account)."
+      return 0
+    fi
+    sleep 3
+    echo "… waiting for Mac App Store sign-in …"
   done
-  echo -e "You are signed into the Mac App Store."
-  signed_in_user=$(mas account)
-  echo -e "MAS user name: $signed_in_user"
 
+  echo "Still not signed into the Mac App Store; continuing without mas sign-in."
 }
 
 # Setup MAS (https://github.com/mas-cli/mas)
