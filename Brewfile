@@ -56,6 +56,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "grok-build"
 cask "codex"
 cask "chatgpt"
 cask "flutter"
