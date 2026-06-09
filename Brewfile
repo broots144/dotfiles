@@ -1,4 +1,5 @@
 # CLI tools
+brew "gemini-cli"
 brew "openjdk"
 brew "node"
 brew "netbirdio/tap/netbird"
