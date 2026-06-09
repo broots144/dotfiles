@@ -1,0 +1,99 @@
+#!/bin/zsh
+#
+# Wrapper around `brew` that keeps $ZSH/Brewfile in sync automatically.
+#
+# After a successful `brew install` / `brew uninstall`, the matching line is
+# surgically added to (or removed from) the Brewfile under the right section,
+# then the dotfiles repo is committed and pushed. Everything else passes
+# straight through to the real brew untouched.
+#
+# Run a normal command and it just works:
+#
+#   brew install keith/formulae/reminders   -> adds  brew "keith/formulae/reminders"
+#   brew install --cask alfred              -> adds  cask "alfred"
+#   brew uninstall reminders                -> removes the matching line
+#
+# Set BREW_SYNC=0 to skip syncing for a single command, e.g.
+#
+#   BREW_SYNC=0 brew install some-throwaway-tool
+
+brew() {
+  command brew "$@"
+  local ret=$?
+
+  # Bail unless the command succeeded and syncing is enabled.
+  [[ $ret -ne 0 || "$BREW_SYNC" == 0 ]] && return $ret
+
+  local sub="$1"
+  case "$sub" in
+    install|uninstall|remove|rm) ;;
+    *) return $ret ;;
+  esac
+  shift
+
+  local brewfile="$ZSH/Brewfile"
+  [[ -f "$brewfile" ]] || return $ret
+
+  # Split package names from flags; note an explicit --cask.
+  local cask_flag=0 a
+  local -a pkgs
+  for a in "$@"; do
+    case "$a" in
+      --cask|--casks) cask_flag=1 ;;
+      -*) ;;                       # ignore other flags (--force, etc.)
+      *)  pkgs+=("$a") ;;
+    esac
+  done
+  (( ${#pkgs} )) || return $ret
+
+  local pkg short esc kind line tmp
+  local -a actions
+  for pkg in "${pkgs[@]}"; do
+    short="${pkg:t}"               # basename, drops any tap prefix
+    esc="${short//+/\\+}"; esc="${esc//./\\.}"
+
+    if [[ "$sub" == install ]]; then
+      # Decide formula vs cask (explicit flag wins, else ask brew).
+      kind=brew
+      if (( cask_flag )) || command brew list --cask --versions "$short" &>/dev/null; then
+        kind=cask
+      fi
+      [[ "$kind" == cask ]] && line="cask \"$pkg\"" || line="brew \"$pkg\""
+
+      # Skip if already present (match by basename, ignoring tap prefix).
+      grep -qE "^${kind} \"([^\"]*/)?${esc}\"" "$brewfile" && continue
+
+      # Insert right under the relevant section header.
+      local hdr="# CLI tools"
+      [[ "$kind" == cask ]] && hdr="# Casks"
+      tmp="$(mktemp)"
+      awk -v hdr="$hdr" -v ins="$line" '
+        { print }
+        !done && $0 == hdr { print ins; done=1 }
+        END { if (!done) print ins }
+      ' "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
+      actions+=("add $short")
+    else
+      # Uninstall: drop any brew/cask line matching the basename.
+      grep -qE "^(brew|cask) \"([^\"]*/)?${esc}\"" "$brewfile" || continue
+      tmp="$(mktemp)"
+      grep -vE "^(brew|cask) \"([^\"]*/)?${esc}\"" "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
+      actions+=("drop $short")
+    fi
+  done
+
+  (( ${#actions} )) || return $ret
+
+  # Commit and push the change to the dotfiles repo.
+  if git -C "$ZSH" diff --quiet -- Brewfile; then
+    return $ret
+  fi
+  git -C "$ZSH" add Brewfile
+  git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" && \
+    echo "Brewfile synced (${(j:, :)actions})"
+  if ! git -C "$ZSH" push -q; then
+    echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
+  fi
+
+  return $ret
+}
