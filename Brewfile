@@ -1,4 +1,7 @@
 # CLI tools
+brew "pipx"
+brew "ollama"
+brew "ocrmypdf"
 brew "grok"
 brew "hf"
 brew "gemini-cli"
@@ -56,6 +59,9 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "ollama-app"
+cask "lm-studio"
+cask "anythingllm"
 cask "grok-build"
 cask "codex"
 cask "chatgpt"
