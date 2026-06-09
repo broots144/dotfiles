@@ -55,6 +55,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "chatgpt"
 cask "flutter"
 cask "android-commandlinetools"
 cask "alfred"
