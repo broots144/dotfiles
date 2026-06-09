@@ -68,6 +68,7 @@ cask "transmission"
 cask "vlc"
 
 # Mac App Store
+mas "Xcode", id: 497799835
 mas "GarageBand", id: 682658836
 mas "iMovie", id: 408981434
 mas "Keynote", id: 361285480
