@@ -1,3 +1,6 @@
+# Taps
+tap "broots144/tap"
+
 # CLI tools
 brew "terminal-notifier"
 brew "poppler"
