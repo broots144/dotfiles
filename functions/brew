@@ -12,10 +12,25 @@
 #   brew install keith/formulae/reminders   -> adds  brew "keith/formulae/reminders"
 #   brew install --cask alfred              -> adds  cask "alfred"
 #   brew uninstall reminders                -> removes the matching line
+#   brew tap netbirdio/tap                  -> adds  tap "netbirdio/tap"
+#   brew untap netbirdio/tap                -> removes the matching line
 #
 # Set BREW_SYNC=0 to skip syncing for a single command, e.g.
 #
 #   BREW_SYNC=0 brew install some-throwaway-tool
+
+# Commit and push the Brewfile change to the dotfiles repo. Args are the
+# human-readable actions that go into the commit message.
+_brew_sync_commit() {
+  local -a actions=("$@")
+  git -C "$ZSH" diff --quiet -- Brewfile && return 0
+  git -C "$ZSH" add Brewfile
+  git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" && \
+    echo "Brewfile synced (${(j:, :)actions})"
+  if ! git -C "$ZSH" push -q; then
+    echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
+  fi
+}
 
 brew() {
   command brew "$@"
@@ -26,7 +41,7 @@ brew() {
 
   local sub="$1"
   case "$sub" in
-    install|uninstall|remove|rm) ;;
+    install|uninstall|remove|rm|tap|untap) ;;
     *) return $ret ;;
   esac
   shift
@@ -48,6 +63,40 @@ brew() {
 
   local pkg short esc kind line tmp
   local -a actions
+
+  # Taps keep their full user/repo name and live in their own section.
+  if [[ "$sub" == tap || "$sub" == untap ]]; then
+    for pkg in "${pkgs[@]}"; do
+      esc="${pkg//+/\\+}"; esc="${esc//./\\.}"; esc="${esc//\//\\/}"
+
+      if [[ "$sub" == tap ]]; then
+        grep -qE "^tap \"${esc}\"" "$brewfile" && continue
+        line="tap \"$pkg\""
+        if grep -qxF "# Taps" "$brewfile"; then
+          tmp="$(mktemp)"
+          awk -v ins="$line" '
+            { print }
+            !done && $0 == "# Taps" { print ins; done=1 }
+          ' "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
+        else
+          # No tap section yet — create one at the top of the file.
+          tmp="$(mktemp)"
+          { print "# Taps"; print "$line"; print ""; } >| "$tmp"
+          cat "$brewfile" >> "$tmp" && mv "$tmp" "$brewfile"
+        fi
+        actions+=("tap $pkg")
+      else
+        grep -qE "^tap \"${esc}\"" "$brewfile" || continue
+        tmp="$(mktemp)"
+        grep -vE "^tap \"${esc}\"" "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
+        actions+=("untap $pkg")
+      fi
+    done
+    (( ${#actions} )) || return $ret
+    _brew_sync_commit "${actions[@]}"
+    return $ret
+  fi
+
   for pkg in "${pkgs[@]}"; do
     short="${pkg:t}"               # basename, drops any tap prefix
     esc="${short//+/\\+}"; esc="${esc//./\\.}"
@@ -83,17 +132,7 @@ brew() {
   done
 
   (( ${#actions} )) || return $ret
-
-  # Commit and push the change to the dotfiles repo.
-  if git -C "$ZSH" diff --quiet -- Brewfile; then
-    return $ret
-  fi
-  git -C "$ZSH" add Brewfile
-  git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" && \
-    echo "Brewfile synced (${(j:, :)actions})"
-  if ! git -C "$ZSH" push -q; then
-    echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
-  fi
+  _brew_sync_commit "${actions[@]}"
 
   return $ret
 }
