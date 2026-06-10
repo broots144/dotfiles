@@ -1,4 +1,6 @@
 # CLI tools
+brew "poppler"
+brew "fswatch"
 brew "wget"
 brew "python@3.12"
 brew "pipx"
