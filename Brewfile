@@ -2,6 +2,7 @@
 tap "broots144/tap"
 
 # CLI tools
+brew "xcodegen"
 brew "terminal-notifier"
 brew "poppler"
 brew "fswatch"
