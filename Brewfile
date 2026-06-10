@@ -1,4 +1,5 @@
 # CLI tools
+brew "terminal-notifier"
 brew "poppler"
 brew "fswatch"
 brew "wget"
