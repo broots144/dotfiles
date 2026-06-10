@@ -68,7 +68,6 @@ brew "k9s"
 brew "ansible"
 
 # Casks
-cask "claude-usage-systray"
 cask "claudebar"
 cask "google-drive"
 cask "ollama-app"
