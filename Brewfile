@@ -1,4 +1,6 @@
 # CLI tools
+brew "wget"
+brew "python@3.12"
 brew "pipx"
 brew "ollama"
 brew "ocrmypdf"
