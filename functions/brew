@@ -19,20 +19,22 @@
 #
 #   BREW_SYNC=0 brew install some-throwaway-tool
 
-# Commit and push the Brewfile change to the dotfiles repo. Args are the
-# human-readable actions that go into the commit message.
-_brew_sync_commit() {
-  local -a actions=("$@")
-  git -C "$ZSH" diff --quiet -- Brewfile && return 0
-  git -C "$ZSH" add Brewfile
-  git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" && \
-    echo "Brewfile synced (${(j:, :)actions})"
-  if ! git -C "$ZSH" push -q; then
-    echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
-  fi
-}
-
 brew() {
+  # Commit and push the Brewfile change to the dotfiles repo. Args are the
+  # human-readable actions that go into the commit message. Defined inside
+  # brew() so this file has a single top-level function — zsh's autoload
+  # only runs the body on first call when the file defines just one function.
+  _brew_sync_commit() {
+    local -a actions=("$@")
+    git -C "$ZSH" diff --quiet -- Brewfile && return 0
+    git -C "$ZSH" add Brewfile
+    git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" && \
+      echo "Brewfile synced (${(j:, :)actions})"
+    if ! git -C "$ZSH" push -q; then
+      echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
+    fi
+  }
+
   command brew "$@"
   local ret=$?
 
