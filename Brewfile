@@ -70,7 +70,6 @@ brew "k9s"
 brew "ansible"
 
 # Casks
-cask "broots144/tap/claudeglance"
 cask "claudebar"
 cask "google-drive"
 cask "ollama-app"
