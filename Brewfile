@@ -70,6 +70,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "raspberry-pi-imager"
 cask "maccy"
 cask "claudeglance"
 cask "claudebar"
