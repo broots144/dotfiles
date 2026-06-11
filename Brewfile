@@ -70,6 +70,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "maccy"
 cask "claudeglance"
 cask "claudebar"
 cask "google-drive"
