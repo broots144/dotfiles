@@ -1,4 +1,5 @@
 # Taps
+tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
