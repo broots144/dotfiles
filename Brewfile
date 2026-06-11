@@ -3,6 +3,7 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "autoraise"
 brew "xcodegen"
 brew "terminal-notifier"
 brew "poppler"
