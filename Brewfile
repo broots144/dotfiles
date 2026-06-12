@@ -3,6 +3,11 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "restic"
+brew "sops"
+brew "age"
+brew "hcloud"
+brew "opentofu"
 brew "autoraise"
 brew "xcodegen"
 brew "terminal-notifier"
