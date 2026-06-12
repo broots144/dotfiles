@@ -3,6 +3,7 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "b2-tools"
 brew "restic"
 brew "sops"
 brew "age"
