@@ -77,6 +77,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "grandperspective"
 cask "sloth"
 cask "cmux"
 cask "raspberry-pi-imager"
