@@ -77,6 +77,11 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "rectangle"
+cask "hammerspoon"
+cask "ubersicht"
+cask "stats"
+cask "swiftbar"
 cask "grandperspective"
 cask "sloth"
 cask "cmux"
