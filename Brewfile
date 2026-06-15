@@ -3,6 +3,7 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "rust"
 brew "yt-dlp"
 brew "cloudflare-wrangler"
 brew "b2-tools"
