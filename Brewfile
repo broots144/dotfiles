@@ -3,6 +3,10 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "yq"
+brew "pre-commit"
+brew "just"
+brew "ansible-lint"
 brew "netbird"
 brew "rust"
 brew "yt-dlp"
