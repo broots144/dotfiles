@@ -82,6 +82,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "rsyncui"
 cask "qfinder-pro"
 cask "rectangle"
 cask "hammerspoon"
