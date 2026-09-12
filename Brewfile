@@ -118,6 +118,7 @@ cask "transmission"
 cask "vlc"
 
 # Mac App Store
+mas "HDHomeRun", id: 949582631
 mas "Xcode", id: 497799835
 mas "GarageBand", id: 682658836
 mas "iMovie", id: 408981434
