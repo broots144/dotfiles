@@ -3,6 +3,7 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "pnpm"
 brew "yq"
 brew "pre-commit"
 brew "just"
