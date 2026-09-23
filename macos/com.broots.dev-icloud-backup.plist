@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent: nightly copy of ~/dev into iCloud Drive (Backups/<host>/dev) so what is not
+  on GitHub (OpenTofu state, local branches, gitignored config) exists off the machine and
+  out of the house. See bin/dev-icloud-backup.
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.dev-icloud-backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.dotfiles/bin/dev-icloud-backup</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- 03:45 local, after the lab's 02:00-03:30 backup window. Missed runs (sleep) fire on wake. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>45</integer>
+    </dict>
+
+    <!-- Low priority: never compete with interactive work or Ollama. -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/dev-icloud-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/dev-icloud-backup.log</string>
+</dict>
+</plist>

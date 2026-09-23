@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# Nightly copy of ~/dev into iCloud Drive: the off-site copy of what is not on GitHub
+# (OpenTofu state, gitignored config, local branches, unpushed work).
+#
+# A copy, not a move: the repos stay live on local disk, so iCloud never syncs a working
+# .git directory and Optimize Mac Storage never evicts a file a tool is using.
+# Rebuildable directories and the two bulk folders (downloads, model weights) are skipped.
+# --delete mirrors deletions; iCloud Drive keeps deleted files in Recently Deleted for 30 days.
+#
+# Not copied here on purpose: ~/.ssh and ~/.config/sops (private keys). Those come back from
+# LastPass (age key) and Time Machine, never from a synced folder.
+#
+# Run by macos/com.broots.dev-icloud-backup.plist; by hand: dev-icloud-backup [-n]
+
+set -euo pipefail
+
+src="$HOME/dev/"
+icloud="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
+root="$icloud/Backups/$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+dst="$root/dev/"
+
+if [[ ! -d "$icloud" ]]; then
+  echo "$(date -u +%FT%TZ) iCloud Drive not found at $icloud; nothing copied" >&2
+  exit 1
+fi
+mkdir -p "$dst"
+
+dry=()
+[[ "${1:-}" == "-n" ]] && dry=(-n)
+
+# Top-level folders to skip entirely (re-acquirable, tens of GB).
+excludes=(
+  /bulk-youtube-download/
+  /local-image-llm/
+  node_modules/ .venv/ venv/ .terraform/ dist/ .astro/ .next/ .cache/
+  __pycache__/ .pytest_cache/ .ruff_cache/ .mypy_cache/
+  '*.iso' .DS_Store
+)
+args=()
+for e in "${excludes[@]}"; do args+=(--exclude "$e"); done
+
+start=$(date +%s)
+status=0
+/usr/bin/rsync -a --delete "${dry[@]}" "${args[@]}" "$src" "$dst" || status=$?
+
+if [[ ${#dry[@]} -eq 0 ]]; then
+  printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
+    "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/LAST_RUN.json"
+fi
+echo "$(date -u +%FT%TZ) dev-icloud-backup exit=$status in $(( $(date +%s) - start ))s"
+exit "$status"
