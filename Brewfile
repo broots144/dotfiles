@@ -3,6 +3,8 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "exiftool"
+brew "gitleaks"
 brew "pnpm"
 brew "yq"
 brew "pre-commit"
