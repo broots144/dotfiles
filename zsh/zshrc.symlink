@@ -2,7 +2,7 @@
 export ZSH=$HOME/.dotfiles
 
 # your project folder that we can `c [tab]` to
-export PROJECTS=~/projects
+export PROJECTS=~/dev
 
 # Stash your environment variables in ~/.localrc. This means they'll stay out
 # of your main dotfiles repository (which may be public, like this one), but
@@ -50,3 +50,12 @@ bindkey "^[[A" up-line-or-beginning-search # Up
 bindkey "^[[B" down-line-or-beginning-search # Down
 
 ZSH_THEME="cobalt2"
+
+# --- sublevel: SOPS age key discovery (ADR-015) ---
+# sops on macOS does not read ~/.config/sops/age/keys.txt by default.
+export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt"
+
+# --- sublevel: K3s sandbox kubeconfig (ADR-032) ---
+# kubectl targets the n4 K3s learning cluster by default. To also use other
+# clusters, append them: KUBECONFIG="$HOME/.kube/config:$HOME/.kube/sublevel-k3s.yaml"
+export KUBECONFIG="$HOME/.kube/sublevel-k3s.yaml"
