@@ -3,6 +3,8 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "cfn-lint"
+brew "aws-sam-cli"
 brew "exiftool"
 brew "gitleaks"
 brew "pnpm"
