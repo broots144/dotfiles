@@ -10,3 +10,19 @@ atom.symlink/blob-store
 atom.symlink/recovery
 
 git/gitconfig.local.symlink
+
+# Secrets and local state never belong in this public repo (dot -p and gac stage
+# everything that is not ignored).
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.age
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.local.zsh
+.claude/settings.local.json
+.claude/.cc-writes/
+.DS_Store
