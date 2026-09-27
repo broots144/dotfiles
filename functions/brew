@@ -27,8 +27,8 @@ brew() {
   _brew_sync_commit() {
     local -a actions=("$@")
     git -C "$ZSH" diff --quiet -- Brewfile && return 0
-    git -C "$ZSH" add Brewfile
-    git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" && \
+    # Commit the Brewfile alone: whatever else is staged in the index stays out.
+    git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" --only -- Brewfile && \
       echo "Brewfile synced (${(j:, :)actions})"
     if ! git -C "$ZSH" push -q; then
       echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
@@ -76,9 +76,10 @@ brew() {
         line="tap \"$pkg\""
         if grep -qxF "# Taps" "$brewfile"; then
           tmp="$(mktemp)"
-          awk -v ins="$line" '
+          # ENVIRON, not awk -v: -v would interpret backslash escapes in the line.
+          INS="$line" awk '
             { print }
-            !done && $0 == "# Taps" { print ins; done=1 }
+            !done && $0 == "# Taps" { print ENVIRON["INS"]; done=1 }
           ' "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
         else
           # No tap section yet — create one at the top of the file.
@@ -109,7 +110,14 @@ brew() {
       if (( cask_flag )) || command brew list --cask --versions "$short" &>/dev/null; then
         kind=cask
       fi
-      [[ "$kind" == cask ]] && line="cask \"$pkg\"" || line="brew \"$pkg\""
+      # A cask from a tap other than homebrew/cask is recorded tap-qualified (see
+      # brew-reconcile) so a fresh machine never picks a same-named cask elsewhere.
+      local ref="$pkg" ctap=""
+      if [[ "$kind" == cask && "$pkg" != */* ]] && (( $+commands[jq] )); then
+        ctap="$(command brew info --cask --json=v2 "$pkg" 2>/dev/null | jq -r '.casks[0].tap // empty' 2>/dev/null)"
+        [[ -n "$ctap" && "$ctap" != homebrew/cask ]] && ref="$ctap/$pkg"
+      fi
+      [[ "$kind" == cask ]] && line="cask \"$ref\"" || line="brew \"$pkg\""
 
       # Skip if already present (match by basename, ignoring tap prefix).
       grep -qE "^${kind} \"([^\"]*/)?${esc}\"" "$brewfile" && continue
@@ -118,10 +126,10 @@ brew() {
       local hdr="# CLI tools"
       [[ "$kind" == cask ]] && hdr="# Casks"
       tmp="$(mktemp)"
-      awk -v hdr="$hdr" -v ins="$line" '
+      HDR="$hdr" INS="$line" awk '
         { print }
-        !done && $0 == hdr { print ins; done=1 }
-        END { if (!done) print ins }
+        !done && $0 == ENVIRON["HDR"] { print ENVIRON["INS"]; done=1 }
+        END { if (!done) print ENVIRON["INS"] }
       ' "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
       actions+=("add $short")
     else
