@@ -9,7 +9,6 @@ set -e
 
 parentDirectory="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P)"
 dotfilesDirectory="$(cd "$( dirname "$parentDirectory" )" && pwd -P)"
-hostname="$(hostname -s)"
 
 displayUsageAndExit() {
 	echo "dot -- dotfiles management"
@@ -44,7 +43,7 @@ pushToGithub() {
 	git checkout master
 	git pull
 	git add .
-	git commit -m "Auto sync and Push from $hostname"
+	git commit -m "Auto sync and push"
 	git push
 	echo "Done"
 	cd $current_dir

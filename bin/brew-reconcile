@@ -118,10 +118,11 @@ fi
 insert_line() {
   local hdr="$1" ins="$2" tmp
   tmp="$(mktemp)" || return 1
-  awk -v hdr="$hdr" -v ins="$ins" '
+  # Via ENVIRON, not awk -v: -v would interpret backslash escapes in the line.
+  HDR="$hdr" INS="$ins" awk '
     { print }
-    !done && $0 == hdr { print ins; done=1 }
-    END { if (!done) print ins }
+    !done && $0 == ENVIRON["HDR"] { print ENVIRON["INS"]; done=1 }
+    END { if (!done) print ENVIRON["INS"] }
   ' "$brewfile" > "$tmp" && mv "$tmp" "$brewfile"
 }
 
@@ -131,8 +132,15 @@ done
 for pkg in "${add_cask[@]}"; do
   insert_line "# Casks" "cask \"${pkg#cask:}\""
 done
+# App Store names come from `mas list`, not from us, and land in a Ruby string
+# that `brew bundle` evaluates: escape \ " and # (which would start #{...}).
+ruby_str() {
+  local s="$1"
+  s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//\#/\\#}"
+  print -r -- "$s"
+}
 for pkg in "${add_mas[@]}"; do
-  insert_line "# Mac App Store" "mas \"${pkg#*:}\", id: ${pkg%%:*}"
+  insert_line "# Mac App Store" "mas \"$(ruby_str "${pkg#*:}")\", id: ${pkg%%:*}"
 done
 
 # ---- commit & push ----------------------------------------------------------
@@ -142,15 +150,23 @@ if git -C "$ZSH" diff --quiet -- Brewfile; then
 fi
 
 local msg="brew: reconcile ${(j:, :)actions}"
-git -C "$ZSH" add Brewfile
-if git -C "$ZSH" commit -q -m "$msg"; then
+# Commit the Brewfile alone: whatever else is staged in the index stays out.
+if git -C "$ZSH" commit -q -m "$msg" --only -- Brewfile; then
   echo "brew-reconcile: committed — $msg"
 else
   echo "brew-reconcile: commit failed" >&2
   exit 1
 fi
 
+# Push only when this commit is the one thing unpushed, so an unattended run never
+# publishes work in progress that happened to be committed locally.
 if (( do_push )); then
+  local ahead
+  ahead="$(git -C "$ZSH" rev-list --count '@{u}..HEAD' 2>/dev/null)" || ahead=""
+  if [[ "$ahead" != 1 ]]; then
+    echo "brew-reconcile: not pushing (${ahead:-no upstream} commit(s) ahead of upstream); push by hand after review" >&2
+    exit 0
+  fi
   if git -C "$ZSH" push -q; then
     echo "brew-reconcile: pushed"
   else
