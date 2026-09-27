@@ -3,6 +3,7 @@ tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
+brew "gnu-tar"
 brew "actionlint"
 brew "cfn-lint"
 brew "aws-sam-cli"
