@@ -11,6 +11,12 @@
 # Not copied here on purpose: ~/.ssh and ~/.config/sops (private keys). Those come back from
 # LastPass (age key) and Time Machine, never from a synced folder.
 #
+# Secret-bearing files under ~/dev (OpenTofu state and tfvars, .env, OAuth tokens and client
+# secrets, private keys, agent local settings) are never mirrored in plaintext. They go into one
+# archive, dev-secrets.tar.age, encrypted to the age public key in ~/.config/sops/age/keys.txt,
+# whose private half is not in iCloud. Restore:
+#   age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xf - -C ~/dev
+#
 # Run by macos/com.broots.dev-icloud-backup.plist; by hand: dev-icloud-backup [-n]
 
 set -euo pipefail
@@ -37,12 +43,47 @@ excludes=(
   __pycache__/ .pytest_cache/ .ruff_cache/ .mypy_cache/
   '*.iso' .DS_Store
 )
+# Secret-bearing names: kept out of the plaintext mirror, archived encrypted below.
+secrets=(
+  '*.tfstate' '*.tfstate.*' '*.tfvars' .env '.env.*' values.env '*.dev.vars' .dev.vars
+  '*.pem' '*.key' '*.p12' 'id_rsa*' 'id_ed25519*' '*keys.txt' '*.kubeconfig' kubeconfig
+  'token*.json' 'client_secret*.json' 'credentials*.json' .netrc .npmrc .pypirc
+  settings.local.json
+)
 args=()
-for e in "${excludes[@]}"; do args+=(--exclude "$e"); done
+for e in "${excludes[@]}" "${secrets[@]}"; do args+=(--exclude "$e"); done
 
 start=$(date +%s)
 status=0
-/usr/bin/rsync -a --delete "${dry[@]}" "${args[@]}" "$src" "$dst" || status=$?
+# --delete-excluded also removes secret files an older run mirrored in plaintext.
+/usr/bin/rsync -a --delete --delete-excluded "${dry[@]}" "${args[@]}" "$src" "$dst" || status=$?
+
+# The secret files: the same bulk excludes, then only the secret names, as one encrypted archive.
+keys="$HOME/.config/sops/age/keys.txt"
+recipient=$(sed -n 's/^# public key: //p' "$keys" 2>/dev/null | head -1)
+if [[ ${#dry[@]} -gt 0 ]]; then
+  :
+elif [[ -z "$recipient" ]]; then
+  echo "$(date -u +%FT%TZ) no age public key in $keys; secret files not archived" >&2
+  [[ $status -eq 0 ]] && status=3
+else
+  age=$(command -v age || echo /opt/homebrew/bin/age)
+  incl=()
+  for e in "${excludes[@]}"; do incl+=(--exclude "$e"); done
+  incl+=(--include '*/')
+  for e in "${secrets[@]}"; do incl+=(--include "$e"); done
+  incl+=(--exclude '*')
+  list=$(mktemp); tmp="$root/.dev-secrets.tar.age.tmp"
+  trap 'rm -f "$list" "$tmp"' EXIT
+  /usr/bin/rsync -a --dry-run --out-format='%n' "${incl[@]}" "$src" /nonexistent-dst/ 2>/dev/null \
+    | grep -v '/$' > "$list" || true
+  if tar -cf - -C "$src" -T "$list" | "$age" -r "$recipient" -o "$tmp" && mv -f "$tmp" "$root/dev-secrets.tar.age"; then
+    echo "$(date -u +%FT%TZ) archived $(wc -l < "$list" | tr -d ' ') secret files (encrypted)"
+  else
+    echo "$(date -u +%FT%TZ) secret archive failed" >&2
+    [[ $status -eq 0 ]] && status=4
+  fi
+fi
 
 if [[ ${#dry[@]} -eq 0 ]]; then
   printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
