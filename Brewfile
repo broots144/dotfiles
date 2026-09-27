@@ -1,5 +1,4 @@
 # Taps
-tap "dimentium/autoraise"
 tap "broots144/tap"
 
 # CLI tools
@@ -101,7 +100,7 @@ cask "sloth"
 cask "cmux"
 cask "raspberry-pi-imager"
 cask "maccy"
-cask "claudeglance"
+cask "broots144/tap/claudeglance"
 cask "google-drive"
 cask "ollama-app"
 cask "lm-studio"

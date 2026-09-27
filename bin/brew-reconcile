@@ -129,9 +129,6 @@ insert_line() {
 for pkg in "${add_brew[@]}"; do
   insert_line "# CLI tools" "brew \"$pkg\""
 done
-for pkg in "${add_cask[@]}"; do
-  insert_line "# Casks" "cask \"${pkg#cask:}\""
-done
 # App Store names come from `mas list`, not from us, and land in a Ruby string
 # that `brew bundle` evaluates: escape \ " and # (which would start #{...}).
 ruby_str() {
@@ -139,6 +136,20 @@ ruby_str() {
   s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//\#/\\#}"
   print -r -- "$s"
 }
+# A cask from a tap other than homebrew/cask is recorded tap-qualified, so a fresh
+# machine installs it from that tap and never a same-named cask from another one.
+cask_ref() {
+  local tok="$1" tap
+  tap="$(brew info --cask --json=v2 "$tok" 2>/dev/null | jq -r '.casks[0].tap // empty' 2>/dev/null)"
+  if [[ -n "$tap" && "$tap" != homebrew/cask && "$tok" != */* ]]; then
+    print -r -- "$tap/$tok"
+  else
+    print -r -- "$tok"
+  fi
+}
+for pkg in "${add_cask[@]}"; do
+  insert_line "# Casks" "cask \"$(ruby_str "$(cask_ref "${pkg#cask:}")")\""
+done
 for pkg in "${add_mas[@]}"; do
   insert_line "# Mac App Store" "mas \"$(ruby_str "${pkg#*:}")\", id: ${pkg%%:*}"
 done
