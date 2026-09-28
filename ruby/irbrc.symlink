@@ -27,7 +27,7 @@ class Object
       klass = self.kind_of?(Class) ? name : self.class.name
       method = [klass, method].compact.join('#')
     end
-    puts `ri '#{method}'`
+    puts IO.popen(["ri", method.to_s], &:read)
   end
 end
 
@@ -35,7 +35,7 @@ end
 # clipboard (if you're on macOS).
 def cop
   last_value = IRB.CurrentContext.last_value
-  %x[echo '#{last_value}' | pbcopy]
+  IO.popen(["pbcopy"], "w") { |io| io.write(last_value.to_s) }
   "copied \`#{last_value}' to your clipboard"
 end
 

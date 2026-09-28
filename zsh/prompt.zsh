@@ -8,6 +8,10 @@ then
 else
   git="/usr/bin/git"
 fi
+# The prompt runs git in whatever directory you cd into. A checked-out tree can hold a
+# repo-shaped directory (a bare repo with core.worktree) whose config sets core.fsmonitor,
+# which git would execute. Ignore implicit bare repos and never run an fsmonitor hook here.
+git=("$git" -c safe.bareRepository=explicit -c core.fsmonitor=false)
 
 git_branch() {
   echo $($git symbolic-ref HEAD 2>/dev/null | awk -F/ {'print $NF'})
@@ -39,7 +43,7 @@ git_prompt_info () {
 need_push () {
   if [ $($git rev-parse --is-inside-work-tree 2>/dev/null) ]
   then
-    number=$($git cherry -v origin/$(git symbolic-ref --short HEAD) 2>/dev/null | wc -l | bc)
+    number=$($git cherry -v origin/$($git symbolic-ref --short HEAD) 2>/dev/null | wc -l | bc)
 
     if [[ $number == 0 ]]
     then

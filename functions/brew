@@ -28,8 +28,19 @@ brew() {
     local -a actions=("$@")
     git -C "$ZSH" diff --quiet -- Brewfile && return 0
     # Commit the Brewfile alone: whatever else is staged in the index stays out.
-    git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" --only -- Brewfile && \
-      echo "Brewfile synced (${(j:, :)actions})"
+    if ! git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" --only -- Brewfile; then
+      echo "Brewfile commit failed; nothing pushed" >&2
+      return 1
+    fi
+    echo "Brewfile synced (${(j:, :)actions})"
+    # Push only when this commit is the one thing unpushed, so a brew install never
+    # publishes other work that happened to be committed locally.
+    local ahead
+    ahead="$(git -C "$ZSH" rev-list --count '@{u}..HEAD' 2>/dev/null)" || ahead=""
+    if [[ "$ahead" != 1 ]]; then
+      echo "Brewfile committed, not pushed (${ahead:-no upstream} commit(s) ahead); push by hand after review" >&2
+      return 0
+    fi
     if ! git -C "$ZSH" push -q; then
       echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
     fi

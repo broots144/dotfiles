@@ -42,9 +42,17 @@ pushToGithub() {
 	echo "Committing and pushing to Github"
 	git checkout master
 	git pull
-	git add .
-	git commit -m "Auto sync and push"
-	git push
+	# Tracked files only: a new untracked file (a key, a .env) never goes to the public repo
+	# unless it was added by hand first.
+	git add -u
+	if git diff --cached --quiet; then
+		echo "Nothing to commit"
+	else
+		git commit -m "Auto sync and push"
+		git push
+	fi
+	untracked="$(git ls-files --others --exclude-standard)"
+	[ -n "$untracked" ] && printf 'Not pushed (untracked; git add them first if intended):\n%s\n' "$untracked"
 	echo "Done"
 	cd $current_dir
 }
