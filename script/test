@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# Run the regression tests in test/.
+set -e
+cd "$(dirname "$0")/.."
+for t in test/*.sh; do "$t"; done

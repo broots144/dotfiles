@@ -44,12 +44,28 @@ excludes=(
   '*.iso' .DS_Store
 )
 # Secret-bearing names: kept out of the plaintext mirror, archived encrypted below.
-secrets=(
-  '*.tfstate' '*.tfstate.*' '*.tfvars' .env '.env.*' values.env '*.dev.vars' .dev.vars
-  '*.pem' '*.key' '*.p12' 'id_rsa*' 'id_ed25519*' '*keys.txt' '*.kubeconfig' kubeconfig
-  'token*.json' 'client_secret*.json' 'credentials*.json' .netrc .npmrc .pypirc
-  settings.local.json
+# Matched case-insensitively (.ENV, KEY.PEM). A name that turns out to be a directory goes
+# into the archive whole, so nothing it holds is dropped from both copies.
+secret_names=(
+  '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json' '*.tfplan' tfplan plan.out
+  '.env*' '*.env' values.env '*.dev.vars' .dev.vars '*.envrc'
+  '*.pem' '*.key' '*.p12' '*.pfx' '*.jks' '*.keystore' 'id_rsa*' 'id_ecdsa*' 'id_ed25519*'
+  '*keys.txt' '*.kubeconfig' 'kubeconfig*' '*-key.json' '*_key.json' '*serviceaccount*.json'
+  'token*.json' 'client_secret*.json' 'credentials*' .git-credentials .netrc .npmrc .pypirc
+  settings.local.json .mcp.json '*.age' '*.gpg' '*.asc'
 )
+# 'ab' -> '[aA][bB]': rsync patterns are case-sensitive. Portable to macOS bash 3.2.
+nocase() {
+  local p="$1" out="" c lo up i
+  for (( i = 0; i < ${#p}; i++ )); do
+    c="${p:i:1}"
+    lo=$(printf %s "$c" | tr '[:upper:]' '[:lower:]'); up=$(printf %s "$c" | tr '[:lower:]' '[:upper:]')
+    if [[ "$lo" != "$up" ]]; then out+="[$lo$up]"; else out+="$c"; fi
+  done
+  printf %s "$out"
+}
+secrets=()
+for e in "${secret_names[@]}"; do secrets+=("$(nocase "$e")"); done
 args=()
 for e in "${excludes[@]}" "${secrets[@]}"; do args+=(--exclude "$e"); done
 
@@ -71,7 +87,7 @@ else
   incl=()
   for e in "${excludes[@]}"; do incl+=(--exclude "$e"); done
   incl+=(--include '*/')
-  for e in "${secrets[@]}"; do incl+=(--include "$e"); done
+  for e in "${secrets[@]}"; do incl+=(--include "$e" --include "/$e/**" --include "**/$e/**"); done
   incl+=(--exclude '*')
   list=$(mktemp); tmp="$root/.dev-secrets.tar.age.tmp"
   trap 'rm -f "$list" "$tmp"' EXIT
