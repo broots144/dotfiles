@@ -20,16 +20,25 @@ git_branch() {
 # `git status` re-hashes a changed file through the filter driver .gitattributes names, and a
 # repo's own .git/config (or a file it includes) can define that driver as any command. Blank
 # every repo-local driver for the prompt's status calls; global/system ones (git-lfs) stay.
-# Submodules are not entered: their configs would get the same chance.
+# The overrides go in through GIT_CONFIG_KEY_n/VALUE_n, which take the key verbatim: a driver
+# named 'x=y' would be split at '=' by `-c`. Submodules are not entered (their configs would
+# get the same chance).
 git_status_safe() {
-  local -a neut
-  local k d
-  for k in ${(f)"$($git config --show-scope --name-only --get-regexp '^filter\..*\.' 2>/dev/null)"}; do
-    [[ $k == (local|worktree)$'\t'filter.* ]] || continue
-    d=${${k#*$'\t'filter.}%.*}
-    neut+=(-c "filter.$d.clean=" -c "filter.$d.smudge=" -c "filter.$d.process=" -c "filter.$d.required=false")
+  local -a kv envs
+  local scope name d k
+  local -i n=${GIT_CONFIG_COUNT:-0}
+  kv=(${(0)"$($git config -z --show-scope --name-only --get-regexp '^filter\.' 2>/dev/null)"})
+  while (( ${#kv} >= 2 )); do
+    scope=$kv[1] name=$kv[2]
+    kv=("${(@)kv[3,-1]}")
+    [[ $scope == (local|worktree) && $name == filter.*.* ]] || continue
+    d=${${name#filter.}%.*}
+    for k in clean smudge process required; do
+      envs+=("GIT_CONFIG_KEY_$n=filter.$d.$k" "GIT_CONFIG_VALUE_$n=${${k:#required}:+}${${(M)k:#required}:+false}")
+      (( n++ ))
+    done
   done
-  $git "${neut[@]}" status --ignore-submodules=all "$@"
+  env "${envs[@]}" GIT_CONFIG_COUNT=$n $git status --ignore-submodules=all "$@"
 }
 
 git_dirty() {
