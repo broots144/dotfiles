@@ -114,6 +114,11 @@ if (( dry_run )); then
   exit 0
 fi
 
+# Uncommitted Brewfile edits (a hand edit in progress, a `dot -s` dump) are not ours to
+# publish: with those present the insertion below is made but left for a human to commit.
+wip=0
+git -C "$ZSH" diff --quiet HEAD -- Brewfile 2>/dev/null || wip=1
+
 # ---- surgically insert under the right section header -----------------------
 insert_line() {
   local hdr="$1" ins="$2" tmp
@@ -157,6 +162,11 @@ done
 # ---- commit & push ----------------------------------------------------------
 if git -C "$ZSH" diff --quiet -- Brewfile; then
   echo "brew-reconcile: no net change to Brewfile after edit"
+  exit 0
+fi
+
+if (( wip )); then
+  echo "brew-reconcile: Brewfile had uncommitted changes before this run; added lines left uncommitted for review" >&2
   exit 0
 fi
 

@@ -17,12 +17,27 @@ git_branch() {
   echo $($git symbolic-ref HEAD 2>/dev/null | awk -F/ {'print $NF'})
 }
 
+# `git status` re-hashes a changed file through the filter driver .gitattributes names, and a
+# repo's own .git/config (or a file it includes) can define that driver as any command. Blank
+# every repo-local driver for the prompt's status calls; global/system ones (git-lfs) stay.
+# Submodules are not entered: their configs would get the same chance.
+git_status_safe() {
+  local -a neut
+  local k d
+  for k in ${(f)"$($git config --show-scope --name-only --get-regexp '^filter\..*\.' 2>/dev/null)"}; do
+    [[ $k == (local|worktree)$'\t'filter.* ]] || continue
+    d=${${k#*$'\t'filter.}%.*}
+    neut+=(-c "filter.$d.clean=" -c "filter.$d.smudge=" -c "filter.$d.process=" -c "filter.$d.required=false")
+  done
+  $git "${neut[@]}" status --ignore-submodules=all "$@"
+}
+
 git_dirty() {
-  if $(! $git status -s &> /dev/null)
+  if $(! git_status_safe -s &> /dev/null)
   then
     echo ""
   else
-    if [[ $($git status --porcelain) == "" ]]
+    if [[ $(git_status_safe --porcelain) == "" ]]
     then
       echo "on %{$fg_bold[green]%}$(git_prompt_info)%{$reset_color%}"
     else

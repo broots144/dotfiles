@@ -11,13 +11,21 @@
 # Not copied here on purpose: ~/.ssh and ~/.config/sops (private keys). Those come back from
 # LastPass (age key) and Time Machine, never from a synced folder.
 #
-# Secret-bearing files under ~/dev (OpenTofu state and tfvars, .env, OAuth tokens and client
-# secrets, private keys, agent local settings) are never mirrored in plaintext. They go into one
-# archive, dev-secrets.tar.age, encrypted to the age public key in ~/.config/sops/age/keys.txt,
-# whose private half is not in iCloud. Restore:
-#   age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xf - -C ~/dev
+# Only age ciphertext carries anything that may hold a secret. Everything below is encrypted
+# to the age public key in ~/.config/sops/age/keys.txt, whose private half is not in iCloud:
+#   - dev-secrets.tar.age: files with a secret-bearing name (OpenTofu state and tfvars, .env,
+#     OAuth tokens, private keys, kubeconfigs, agent local settings, ...), every gitignored
+#     file up to 1 MiB that sits outside an ignored directory (default-deny for secret names
+#     the list misses), and each repo's .git/config. Dated copies are kept in secrets-history/.
+#   - git/<repo>.bundle.age: every repo's history (all branches, tags, stash), rebuilt only
+#     when its refs change. The plaintext mirror never holds a .git directory, because a
+#     secret that was ever staged or committed lives on in the object store.
+# Restore into a staging directory, then compare before copying anything back over ~/dev:
+#   mkdir /tmp/restore && age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xf - -C /tmp/restore
+#   age -d -i ~/.config/sops/age/keys.txt git/<repo>.bundle.age > /tmp/r.bundle && git clone /tmp/r.bundle <dir>
 #
 # Run by macos/com.broots.dev-icloud-backup.plist; by hand: dev-icloud-backup [-n]
+# Exit: 0 ok, 3 no age key, 4 secret archive failed, 5 a git bundle failed, 6 source implausible.
 
 set -euo pipefail
 
@@ -35,7 +43,27 @@ mkdir -p "$dst"
 dry=()
 [[ "${1:-}" == "-n" ]] && dry=(-n)
 
-# Top-level folders to skip entirely (re-acquirable, tens of GB).
+start=$(date +%s)
+status=0
+finish() {
+  if [[ ${#dry[@]} -eq 0 ]]; then
+    printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
+      "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/LAST_RUN.json"
+  fi
+  echo "$(date -u +%FT%TZ) dev-icloud-backup exit=$status in $(( $(date +%s) - start ))s"
+  exit "$status"
+}
+
+# An emptied or unmounted ~/dev must not be mirrored (with --delete) over a good backup.
+n_src=$(find "$src" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+n_dst=$(find "$dst" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+if (( n_src == 0 || n_src * 2 < n_dst )); then
+  echo "$(date -u +%FT%TZ) $src has $n_src entries, mirror has $n_dst; refusing to mirror or archive" >&2
+  status=6
+  finish
+fi
+
+# Folders to skip entirely (re-acquirable, tens of GB). '/x/' = top level only, 'x/' = anywhere.
 excludes=(
   /bulk-youtube-download/
   /local-image-llm/
@@ -49,9 +77,14 @@ excludes=(
 secret_names=(
   '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json' '*.tfplan' tfplan plan.out
   '.env*' '*.env' values.env '*.dev.vars' .dev.vars '*.envrc'
-  '*.pem' '*.key' '*.p12' '*.pfx' '*.jks' '*.keystore' 'id_rsa*' 'id_ecdsa*' 'id_ed25519*'
-  '*keys.txt' '*.kubeconfig' 'kubeconfig*' '*-key.json' '*_key.json' '*serviceaccount*.json'
-  'token*.json' 'client_secret*.json' 'credentials*' .git-credentials .netrc .npmrc .pypirc
+  '*.pem' '*.key' '*.p12' '*.pfx' '*.p8' '*.ppk' '*.jks' '*.keystore'
+  'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*'
+  '*keys.txt' '*.kubeconfig' 'kubeconfig*' '*-k3s.yaml' '*-k3s.yml' '*k8s-config*'
+  '*-key.json' '*_key.json' '*serviceaccount*.json' '*service-account*.json'
+  '*service_account*.json' sa.json
+  'token*.json' 'token*.pickle' 'client_secret*.json' 'credentials*' '*secrets*'
+  .git-credentials .netrc .npmrc .pypirc .pgpass .htpasswd '.vault_pass*' '*vault-pass*'
+  '*.local.zsh' '*.local.symlink' 'gitconfig.local*'
   settings.local.json .mcp.json '*.age' '*.gpg' '*.asc'
 )
 # 'ab' -> '[aA][bB]': rsync patterns are case-sensitive. Portable to macOS bash 3.2.
@@ -64,46 +97,103 @@ nocase() {
   done
   printf %s "$out"
 }
-secrets=()
-for e in "${secret_names[@]}"; do secrets+=("$(nocase "$e")"); done
-args=()
-for e in "${excludes[@]}" "${secrets[@]}"; do args+=(--exclude "$e"); done
+args=(--exclude .git/)
+for e in "${excludes[@]}"; do args+=(--exclude "$e"); done
+for e in "${secret_names[@]}"; do args+=(--exclude "$(nocase "$e")"); done
 
-start=$(date +%s)
-status=0
-# --delete-excluded also removes secret files an older run mirrored in plaintext.
-/usr/bin/rsync -a --delete --delete-excluded "${dry[@]}" "${args[@]}" "$src" "$dst" || status=$?
+# The same bulk folders as find(1) prune rules, and the secret names as -iname tests.
+bulk=()
+for e in "${excludes[@]}"; do
+  case "$e" in
+    /*/) bulk+=(-o -path "./${e:1:${#e}-2}") ;;
+    */)  bulk+=(-o -name "${e%/}") ;;
+  esac
+done
+named=()
+for e in "${secret_names[@]}"; do named+=(-o -iname "$e"); done
+named=( \( "${named[@]:1}" \) )
 
-# The secret files: the same bulk excludes, then only the secret names, as one encrypted archive.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+# Every list below is NUL-separated, relative to ~/dev, so any legal file name survives.
+strip() { local p; while IFS= read -r -d '' p; do printf '%s\0' "${p#./}"; done; }
+git_safe=(git -c safe.bareRepository=explicit -c core.fsmonitor=false)
+
+(cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) | strip > "$work/named"
+(cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) | strip > "$work/repos"
+
+: > "$work/ignored"; : > "$work/gitcfg"; : > "$work/rules"
+while IFS= read -r -d '' g; do
+  r="${g%/.git}"
+  [[ -f "$src$g/config" ]] && printf '%s\0' "$g/config" >> "$work/gitcfg"
+  # Gitignored files outside ignored directories, up to 1 MiB: never plaintext, always archived.
+  while IFS= read -r -d '' f; do
+    [[ "$f" == */ ]] && continue
+    p="$r/$f"
+    [[ -f "$src$p" && ! -L "$src$p" ]] || continue
+    (( $(stat -f %z "$src$p") <= 1048576 )) || continue
+    printf '%s\0' "$p" >> "$work/ignored"
+    q="${p//\*/\\*}"; q="${q//\?/\\?}"; q="${q//\[/\\[}"
+    printf -- '- /%s\0' "$q" >> "$work/rules"
+  done < <("${git_safe[@]}" -C "$src$r" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null || true)
+done < "$work/repos"
+
 keys="$HOME/.config/sops/age/keys.txt"
 recipient=$(sed -n 's/^# public key: //p' "$keys" 2>/dev/null | head -1)
+age=$(command -v age || echo /opt/homebrew/bin/age)
+
 if [[ ${#dry[@]} -gt 0 ]]; then
   :
 elif [[ -z "$recipient" ]]; then
-  echo "$(date -u +%FT%TZ) no age public key in $keys; secret files not archived" >&2
-  [[ $status -eq 0 ]] && status=3
+  echo "$(date -u +%FT%TZ) no age public key in $keys; secret files and git history not archived" >&2
+  status=3
 else
-  age=$(command -v age || echo /opt/homebrew/bin/age)
-  incl=()
-  for e in "${excludes[@]}"; do incl+=(--exclude "$e"); done
-  incl+=(--include '*/')
-  for e in "${secrets[@]}"; do incl+=(--include "$e" --include "/$e/**" --include "**/$e/**"); done
-  incl+=(--exclude '*')
-  list=$(mktemp); tmp="$root/.dev-secrets.tar.age.tmp"
-  trap 'rm -f "$list" "$tmp"' EXIT
-  /usr/bin/rsync -a --dry-run --out-format='%n' "${incl[@]}" "$src" /nonexistent-dst/ 2>/dev/null \
-    | grep -v '/$' > "$list" || true
-  if tar -cf - -C "$src" -T "$list" | "$age" -r "$recipient" -o "$tmp" && mv -f "$tmp" "$root/dev-secrets.tar.age"; then
-    echo "$(date -u +%FT%TZ) archived $(wc -l < "$list" | tr -d ' ') secret files (encrypted)"
+  # The encrypted archive first, so a file newly kept out of the mirror is never in neither copy.
+  cat "$work/named" "$work/ignored" "$work/gitcfg" | sort -zu > "$work/list"
+  n=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
+  tmp="$root/.dev-secrets.tar.age.tmp"; hist="$root/secrets-history"
+  mkdir -p "$hist"
+  if (( n == 0 )); then
+    echo "$(date -u +%FT%TZ) no secret files found; keeping the previous archive" >&2
+    status=4
+  elif tar --null -cf - -C "$src" -T "$work/list" | "$age" -r "$recipient" -o "$tmp" \
+      && mv -f "$tmp" "$root/dev-secrets.tar.age" \
+      && cp -f "$root/dev-secrets.tar.age" "$hist/dev-secrets-$(date +%F).tar.age"; then
+    echo "$(date -u +%FT%TZ) archived $n secret files (encrypted)"
+    # Keep two weeks of generations: one bad night must not leave only a bad archive.
+    ls -1t "$hist"/dev-secrets-*.tar.age 2>/dev/null | tail -n +15 | while IFS= read -r old; do rm -f "$old"; done
   else
+    rm -f "$tmp"
     echo "$(date -u +%FT%TZ) secret archive failed" >&2
-    [[ $status -eq 0 ]] && status=4
+    status=4
   fi
+
+  # Git history as encrypted bundles, rebuilt only when a repo's refs changed.
+  mkdir -p "$root/git"
+  built=0
+  while IFS= read -r -d '' g; do
+    r="${g%/.git}"; name="${r//\//__}"
+    refs=$("${git_safe[@]}" -C "$src$r" for-each-ref --format='%(objectname) %(refname)' 2>/dev/null || true)
+    [[ -n "$refs" ]] || continue
+    sum=$(printf '%s\n' "$refs" | shasum -a 256 | cut -d' ' -f1)
+    [[ -f "$root/git/$name.bundle.age" && "$(cat "$root/git/$name.refs" 2>/dev/null)" == "$sum" ]] && continue
+    if "${git_safe[@]}" -C "$src$r" bundle create -q "$work/b.bundle" --all 2>/dev/null \
+        && "$age" -r "$recipient" -o "$root/git/.$name.tmp" "$work/b.bundle" \
+        && mv -f "$root/git/.$name.tmp" "$root/git/$name.bundle.age"; then
+      printf '%s\n' "$sum" > "$root/git/$name.refs"
+      built=$((built + 1))
+    else
+      rm -f "$root/git/.$name.tmp"
+      echo "$(date -u +%FT%TZ) git bundle failed for $r" >&2
+      [[ $status -eq 0 ]] && status=5
+    fi
+    rm -f "$work/b.bundle"
+  done < "$work/repos"
+  echo "$(date -u +%FT%TZ) rebuilt $built git bundle(s) (encrypted)"
 fi
 
-if [[ ${#dry[@]} -eq 0 ]]; then
-  printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
-    "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/LAST_RUN.json"
-fi
-echo "$(date -u +%FT%TZ) dev-icloud-backup exit=$status in $(( $(date +%s) - start ))s"
-exit "$status"
+# --delete-excluded also removes .git directories and secret files an older run mirrored.
+/usr/bin/rsync -a --delete --delete-excluded "${dry[@]}" "${args[@]}" \
+  --from0 --exclude-from="$work/rules" "$src" "$dst" || { s=$?; [[ $status -eq 0 ]] && status=$s; }
+
+finish

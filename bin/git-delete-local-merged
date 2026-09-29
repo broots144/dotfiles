@@ -5,4 +5,7 @@
 #
 #   https://plus.google.com/115587336092124934674/posts/dXsagsvLakJ
 
-git branch -d `git branch --merged | grep -v '^*' | grep -v 'master' | tr -d '\n'`
+# Branch names are repo data: one argv word each, after --, never through a shell.
+git for-each-ref --merged HEAD --format='%(refname:short)' refs/heads/ \
+  | grep -v master | grep -vxF -e "$(git rev-parse --abbrev-ref HEAD)" \
+  | while IFS= read -r b; do git branch -d -- "$b"; done

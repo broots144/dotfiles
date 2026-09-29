@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Open new, unstaged files in your $EDITOR.
 #
@@ -6,5 +6,14 @@
 # file or three in your working directory, and you know you want to immediately
 # edit them in your editor next. Why waste time clicking around like some sort
 # of plebian when you can just run another command?
+#
+# File names are data: each reaches the editor as one argument, prefixed with ./ so a
+# name like '--command' or '-w' is never read as an editor option, and never globbed.
 
-$EDITOR $(git ls-files --others --exclude-standard)
+files=()
+while IFS= read -r -d '' f; do
+  files+=("./$f")
+done < <(git ls-files -z --others --exclude-standard)
+[ ${#files[@]} -gt 0 ] || { echo "git-edit-new: no new files" >&2; exit 0; }
+# $EDITOR is split on purpose ('subl -w'); the file names are not.
+exec ${EDITOR:-vi} "${files[@]}"
