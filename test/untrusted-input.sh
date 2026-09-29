@@ -24,6 +24,13 @@ touch -t 200001010000 "$t/filt/f"
 out="$(cd "$t/filt" && zsh -fc "source $here/zsh/prompt.zsh; git_dirty" 2>/dev/null)" || true
 no "$t/pwned-filter" "prompt ran a repo-local filter driver"
 [[ "$out" == *main* || "$out" == *master* ]] || { echo "FAIL: prompt lost the branch in a filtered repo"; fail=1; }
+# ... including a driver whose name holds '=' (a `-c filter.x=y.clean=` override would split).
+G init -q "$t/filt2"; echo a > "$t/filt2/f"; echo '* filter=x=y' > "$t/filt2/.gitattributes"
+G -C "$t/filt2" add .; G -C "$t/filt2" commit -qm i
+git -C "$t/filt2" config 'filter.x=y.clean' "touch $t/pwned-filter2; cat"
+touch -t 200001010000 "$t/filt2/f"
+(cd "$t/filt2" && zsh -fc "source $here/zsh/prompt.zsh; git_dirty" >/dev/null 2>&1) || true
+no "$t/pwned-filter2" "prompt ran a repo-local filter driver named with '='"
 
 # git-wtf: branch names from a clone are argv words, not shell text.
 G init -q -b 'main;touch${IFS}pwned-wtf' "$t/wtfsrc"; G -C "$t/wtfsrc" commit -q --allow-empty -m i
