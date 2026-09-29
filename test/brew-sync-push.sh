@@ -19,5 +19,11 @@ git -C "$t/up.git" log --format=%s | grep -qx "local wip" && { echo "FAIL: unrel
 git push -q origin HEAD 2>/dev/null   # reviewer pushes by hand
 run wget
 git -C "$t/up.git" log -1 --format=%s | grep -q '^brew: ' || { echo "FAIL: lone Brewfile commit not pushed"; fail=1; }
+# An uncommitted Brewfile edit (work in progress) must not be committed or pushed with it.
+printf 'brew "wip-private"\n' >> Brewfile
+run curl
+git -C "$t/up.git" show HEAD:Brewfile | grep -q wip-private && { echo "FAIL: uncommitted Brewfile edit pushed"; fail=1; }
+git show HEAD:Brewfile | grep -q wip-private && { echo "FAIL: uncommitted Brewfile edit committed"; fail=1; }
+grep -q '"curl"' Brewfile || { echo "FAIL: install not recorded in the working tree"; fail=1; }
 (( fail == 0 )) && echo "ok brew-sync-push"
 exit "$fail"

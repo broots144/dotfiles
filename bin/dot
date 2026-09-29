@@ -25,36 +25,62 @@ displayUsageAndExit() {
 
 syncBrewfile() {
 	echo "Syncing Brewfile with brew-bundle..."
-	current_dir=$PWD
-	cd /tmp
-	rm -rf Brewfile
-	brew bundle dump
-	mv -f $dotfilesDirectory/Brewfile $dotfilesDirectory/Brewfile-backup
-	mv -f /tmp/Brewfile $dotfilesDirectory/Brewfile
-	cd $current_dir
+	dump="$(mktemp -d)"
+	brew bundle dump --file="$dump/Brewfile"
+	mv -f "$dotfilesDirectory/Brewfile" "$dotfilesDirectory/Brewfile-backup"
+	mv -f "$dump/Brewfile" "$dotfilesDirectory/Brewfile"
+	rmdir "$dump"
 	echo "Done"
 }
 
 pushToGithub() {
 	syncBrewfile
 	current_dir=$PWD
-	cd $dotfilesDirectory
+	cd "$dotfilesDirectory"
 	echo "Committing and pushing to Github"
 	git checkout master
 	git pull
 	# Tracked files only: a new untracked file (a key, a .env) never goes to the public repo
 	# unless it was added by hand first.
 	git add -u
+	# Tracked *.symlink files are the live ~/.gitconfig, ~/.gemrc, ...: whatever a tool writes
+	# with `git config --global` or `gem sources` lands in them. Those go out only after a look.
+	if ! git diff --cached --quiet -- '*.symlink'; then
+		git --no-pager diff --cached -- '*.symlink'
+		if [ -t 0 ] && printf 'Publish these live-config changes to the public repo? [y/N] ' && read -r ans && [ "$ans" = y ]; then
+			:
+		else
+			git restore --staged -- '*.symlink'
+			echo "Live-config (*.symlink) changes left unstaged; review and commit them by hand" >&2
+		fi
+	fi
+	# Credential-shaped additions never reach the public repo unattended.
+	if git diff --cached -U0 | grep '^+' | grep -qiE 'extraheader|authorization:|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|glpat-|xox[abpr]-|AKIA[0-9A-Z]{16}|://[^/@ ]+:[^/@ ]+@|PRIVATE KEY'; then
+		git reset -q
+		echo "Staged changes look like they carry a credential; nothing committed or pushed" >&2
+		exit 1
+	fi
 	if git diff --cached --quiet; then
 		echo "Nothing to commit"
 	else
 		git commit -m "Auto sync and push"
+	fi
+	# Publish only what this run committed; older unpushed commits wait for a human.
+	ahead="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+	if [ "$ahead" -gt 1 ]; then
+		git --no-pager log --oneline '@{u}..HEAD'
+		if [ -t 0 ] && printf 'Push these %s commits to the public repo? [y/N] ' "$ahead" && read -r ans && [ "$ans" = y ]; then
+			git push
+		else
+			echo "Not pushed ($ahead commits ahead); push by hand after review" >&2
+		fi
+	elif [ "$ahead" -eq 1 ]; then
 		git push
 	fi
 	untracked="$(git ls-files --others --exclude-standard)"
 	[ -n "$untracked" ] && printf 'Not pushed (untracked; git add them first if intended):\n%s\n' "$untracked"
 	echo "Done"
-	cd $current_dir
+	cd "$current_dir"
 }
 
 while test $# -gt 0; do

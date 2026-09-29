@@ -27,6 +27,11 @@ brew() {
   _brew_sync_commit() {
     local -a actions=("$@")
     git -C "$ZSH" diff --quiet -- Brewfile && return 0
+    # Uncommitted Brewfile edits from before this command are not ours to publish.
+    if (( brew_wip )); then
+      echo "Brewfile had uncommitted changes; updated but not committed (review, then commit by hand)" >&2
+      return 0
+    fi
     # Commit the Brewfile alone: whatever else is staged in the index stays out.
     if ! git -C "$ZSH" commit -q -m "brew: ${(j:, :)actions}" --only -- Brewfile; then
       echo "Brewfile commit failed; nothing pushed" >&2
@@ -61,6 +66,8 @@ brew() {
 
   local brewfile="$ZSH/Brewfile"
   [[ -f "$brewfile" ]] || return $ret
+  local brew_wip=0
+  git -C "$ZSH" diff --quiet HEAD -- Brewfile 2>/dev/null || brew_wip=1
 
   # Split package names from flags; note an explicit --cask.
   local cask_flag=0 a

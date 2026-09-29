@@ -14,6 +14,29 @@ git -C "$t/clone/evil.git" config core.fsmonitor "touch $t/pwned-prompt; false"
 (cd "$t/clone/evil.git" && zsh -fc "source $here/zsh/prompt.zsh; git_dirty; need_push" >/dev/null 2>&1) || true
 no "$t/pwned-prompt" "prompt ran core.fsmonitor from an untrusted repo"
 
+# Prompt: a repo-local filter driver must not run when the prompt checks for changes.
+G() { git -c user.email=t@example.invalid -c user.name=t -c core.hooksPath=/dev/null "$@"; }
+G init -q "$t/filt"; echo a > "$t/filt/f"; echo '* filter=x.y' > "$t/filt/.gitattributes"
+G -C "$t/filt" add .; G -C "$t/filt" commit -qm i
+git -C "$t/filt" config filter.x.y.clean "touch $t/pwned-filter; cat"
+git -C "$t/filt" config filter.x.y.required true
+touch -t 200001010000 "$t/filt/f"
+out="$(cd "$t/filt" && zsh -fc "source $here/zsh/prompt.zsh; git_dirty" 2>/dev/null)" || true
+no "$t/pwned-filter" "prompt ran a repo-local filter driver"
+[[ "$out" == *main* || "$out" == *master* ]] || { echo "FAIL: prompt lost the branch in a filtered repo"; fail=1; }
+
+# git-wtf: branch names from a clone are argv words, not shell text.
+G init -q -b 'main;touch${IFS}pwned-wtf' "$t/wtfsrc"; G -C "$t/wtfsrc" commit -q --allow-empty -m i
+git clone -q "$t/wtfsrc" "$t/wtf" 2>/dev/null; G -C "$t/wtf" commit -q --allow-empty -m two
+(cd "$t/wtf" && /usr/bin/ruby "$here/bin/git-wtf" >/dev/null 2>&1) || true
+no "$t/wtf/pwned-wtf" "git-wtf ran a branch name through the shell"
+
+# ge: untracked file names reach the editor as single path arguments, never as options.
+G init -q "$t/ge"; touch "$t/ge/--command=x" "$t/ge/a b"
+printf '#!/bin/sh\nfor a; do printf "%%s\\n" "$a"; done\n' > "$t/ed"; chmod +x "$t/ed"
+args="$(cd "$t/ge" && EDITOR="$t/ed" "$here/bin/git-edit-new")"
+[[ "$args" == $'./--command=x\n./a b' ]] || { echo "FAIL: ge passed file names as options or split them"; fail=1; }
+
 # git-wtf: a .git-wtfrc must not instantiate arbitrary Ruby objects.
 printf -- "--- !ruby/object:Gem::Requirement\nrequirements: []\n" > "$t/rc"
 /usr/bin/ruby -ryaml -e "$(sed -n 's/.*(h = \(YAML[^)]*([^)]*)\)).*/x = \1/p' "$here/bin/git-wtf" | sed 's/fn/ARGV[0]/')" "$t/rc" 2>/dev/null \
@@ -32,10 +55,21 @@ mkdir "$t/dots/bin"; touch "$t/dots/Brewfile"; cp "$here/bin/dot" "$t/dots/bin/d
 ( cd "$t/dots"; git config user.email t@example.invalid; git config user.name t
   git checkout -q -b master; git add -A; git commit -qm init >/dev/null 2>&1; git push -q -u origin master >/dev/null 2>&1
   echo secret > .env.new; echo changed >> bin/dot
-  printf '#!/bin/sh\n[ "$1" = bundle ] && touch Brewfile\nexit 0\n' > "$t/bin/brew"; chmod +x "$t/bin/brew"
+  printf '#!/bin/sh\nfor a; do case "$a" in --file=*) touch "${a#--file=}";; esac; done\nexit 0\n' > "$t/bin/brew"; chmod +x "$t/bin/brew"
   PATH="$t/bin:$PATH" sh bin/dot -p >/dev/null 2>&1 || true )
 git -C "$t/up.git" ls-tree -r --name-only master | grep -qx .env.new && { echo "FAIL: dot -p pushed an untracked file"; fail=1; }
 git -C "$t/up.git" log -1 --format=%s master | grep -qx "Auto sync and push" || { echo "FAIL: dot -p did not push tracked changes"; fail=1; }
+
+# dot -p: a live *.symlink config change (what `git config --global` writes) is not published
+# unattended, and credential-shaped additions stop the run.
+( cd "$t/dots"; git pull -q 2>/dev/null; printf '[user]\n' > gitconfig.symlink; git add gitconfig.symlink
+  git commit -qm cfg >/dev/null 2>&1; git push -q >/dev/null 2>&1
+  printf '[http]\n  extraheader = X\n' >> gitconfig.symlink; echo more >> bin/dot
+  PATH="$t/bin:$PATH" sh bin/dot -p >/dev/null 2>&1 </dev/null || true )
+git -C "$t/up.git" show master:gitconfig.symlink | grep -q extraheader && { echo "FAIL: dot -p published a live config change"; fail=1; }
+( cd "$t/dots"; git checkout -q -- gitconfig.symlink; echo 'url = https://u:tok@example.invalid' >> bin/dot
+  PATH="$t/bin:$PATH" sh bin/dot -p >/dev/null 2>&1 </dev/null || true )
+git -C "$t/up.git" show master:bin/dot | grep -q 'u:tok@' && { echo "FAIL: dot -p published a credential-shaped line"; fail=1; }
 
 (( fail == 0 )) && echo "ok untrusted-input"
 exit "$fail"
