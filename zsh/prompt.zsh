@@ -11,7 +11,11 @@ fi
 # The prompt runs git in whatever directory you cd into. A checked-out tree can hold a
 # repo-shaped directory (a bare repo with core.worktree) whose config sets core.fsmonitor,
 # which git would execute. Ignore implicit bare repos and never run an fsmonitor hook here.
-git=("$git" -c safe.bareRepository=explicit -c core.fsmonitor=false)
+# Nor may a repo make the prompt reach the network: a promisor remote with a missing object
+# would lazy-fetch through its own core.sshCommand. No transport, no hooks, no pager.
+git=(env GIT_NO_LAZY_FETCH=1 GIT_TERMINAL_PROMPT=0 "$git" -c safe.bareRepository=explicit
+     -c core.fsmonitor=false -c protocol.allow=never -c core.hooksPath=/dev/null
+     -c core.pager=cat --no-pager)
 
 git_branch() {
   echo $($git symbolic-ref HEAD 2>/dev/null | awk -F/ {'print $NF'})
@@ -63,11 +67,13 @@ git_prompt_info () {
 
 # This assumes that you always have an origin named `origin`, and that you only
 # care about one specific origin. If this is not the case, you might want to use
-# `$git cherry -v @{upstream}` instead.
+# `@{upstream}` instead.
 need_push () {
   if [ $($git rev-parse --is-inside-work-tree 2>/dev/null) ]
   then
-    number=$($git cherry -v origin/$($git symbolic-ref --short HEAD) 2>/dev/null | wc -l | bc)
+    # rev-list, not cherry: a plain count runs no diff machinery (textconv, external diff).
+    number=$($git rev-list --count "origin/$($git symbolic-ref --short HEAD 2>/dev/null)..HEAD" -- 2>/dev/null)
+    number=${number:-0}
 
     if [[ $number == 0 ]]
     then

@@ -32,6 +32,24 @@ touch -t 200001010000 "$t/filt2/f"
 (cd "$t/filt2" && zsh -fc "source $here/zsh/prompt.zsh; git_dirty" >/dev/null 2>&1) || true
 no "$t/pwned-filter2" "prompt ran a repo-local filter driver named with '='"
 
+# Prompt (need_push too): no repo-local textconv, external diff, fsmonitor, hook or lazy-fetch
+# transport command may run. The promisor remote points origin/main at a missing object.
+G init -q -b main "$t/np"; echo a > "$t/np/f"; echo '* diff=tc' > "$t/np/.gitattributes"
+G -C "$t/np" add .; G -C "$t/np" commit -qm i; echo b >> "$t/np/f"; G -C "$t/np" commit -qam two
+git -C "$t/np" config core.repositoryformatversion 1
+git -C "$t/np" config extensions.partialClone origin
+git -C "$t/np" config remote.origin.url ssh://example.invalid/x
+git -C "$t/np" config remote.origin.promisor true
+git -C "$t/np" config core.sshCommand "touch $t/pwned-np-ssh; false"
+git -C "$t/np" config diff.tc.textconv "touch $t/pwned-np-tc; cat"
+git -C "$t/np" config diff.external "touch $t/pwned-np-ext; true"
+git -C "$t/np" config core.fsmonitor "touch $t/pwned-np-fsm; false"
+mkdir -p "$t/np/.git/refs/remotes/origin"
+echo 1111111111111111111111111111111111111111 > "$t/np/.git/refs/remotes/origin/main"
+out="$(cd "$t/np" && zsh -fc "source $here/zsh/prompt.zsh; git_dirty; need_push" 2>/dev/null)" || true
+for w in ssh tc ext fsm; do no "$t/pwned-np-$w" "prompt ran repo-local $w command"; done
+[[ "$out" == *main* ]] || { echo "FAIL: prompt lost the branch in the need_push fixture"; fail=1; }
+
 # git-wtf: branch names from a clone are argv words, not shell text.
 G init -q -b 'main;touch${IFS}pwned-wtf' "$t/wtfsrc"; G -C "$t/wtfsrc" commit -q --allow-empty -m i
 git clone -q "$t/wtfsrc" "$t/wtf" 2>/dev/null; G -C "$t/wtf" commit -q --allow-empty -m two
