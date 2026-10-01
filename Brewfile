@@ -88,6 +88,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "tor-browser"
 cask "rsyncui"
 cask "qfinder-pro"
 cask "rectangle"
