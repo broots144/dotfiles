@@ -2,6 +2,7 @@
 tap "broots144/tap"
 
 # CLI tools
+brew "zbar"
 brew "gnu-tar"
 brew "actionlint"
 brew "cfn-lint"
