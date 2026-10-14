@@ -54,6 +54,9 @@ ZSH_THEME="cobalt2"
 # --- sublevel: SOPS age key discovery (ADR-015) ---
 # sops on macOS does not read ~/.config/sops/age/keys.txt by default.
 export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt"
+# sublevel ADR-069: an admin machine with its own lab key tells ansible/inventory.yml about it
+# (n0 has no such file: the inventory defaults are n0's keys).
+[[ -f "$HOME/.ssh/workshop-book" ]] && export SUBLEVEL_ADMIN_KEY="$HOME/.ssh/workshop-book"
 
 # --- sublevel: K3s sandbox kubeconfig (ADR-032) ---
 # kubectl targets the n4 K3s learning cluster by default. To also use other

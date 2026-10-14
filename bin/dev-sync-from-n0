@@ -10,8 +10,9 @@
 #     current, and the laptop then needs no GitHub credentials to stay current. `origin` keeps
 #     the GitHub URL n0 has, for pushing from here once `gh auth login` has been run.
 #     A dirty or diverged checkout is fetched only and reported; nothing here is ever reset.
-#   - private files: what GitHub does not hold (OpenTofu state, tfvars, .env, keys,
-#     gitignored config), the same set lib/dev-tree.sh picks for the iCloud archive, by rsync
+#   - private files: what git does not hold (OpenTofu state, tfvars, .env, keys,
+#     gitignored config), the same set lib/dev-tree.sh picks for the iCloud archive minus
+#     tracked files (those come with the repos), by rsync
 #     with --update: a file newer on this side is never overwritten, it is reported instead
 #     (two local OpenTofu states are the hazard: apply from one machine at a time).
 #   - not here: ~/.ssh and ~/.config/sops (per-device keys, sublevel ADR-018/ADR-069),
@@ -56,7 +57,18 @@ case "${1:-}" in
   --manifest)
     work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
     dev_tree_lists "$dev/" "$work"
-    cat "$work/named" "$work/ignored" | sort -zu
+    # Directories expand to their files so tracked files inside them can be dropped too.
+    # Newline-separated from here on (a file name holding a newline is not a case in ~/dev).
+    (cd "$dev" && cat "$work/named" "$work/ignored" | sort -zu | while IFS= read -r -d '' p; do
+      if [[ -d "$p" && ! -L "$p" ]]; then find "$p" -name .git -prune -o -type f -print; else printf '%s\n' "$p"; fi
+    done) | sort -u > "$work/all"
+    # Git carries tracked files (the clone / fast-forward step above); only what git does not
+    # carry moves by rsync. Otherwise an uncommitted edit on n0 would dirty the laptop's checkout.
+    while IFS= read -r -d '' g; do
+      r="${g%/.git}"
+      "${DEV_TREE_GIT[@]}" -C "$dev/$r" ls-files 2>/dev/null | sed "s|^|$r/|"
+    done < "$work/repos" | sort -u > "$work/tracked"
+    if [[ -s "$work/tracked" ]]; then grep -vxF -f "$work/tracked" "$work/all"; else cat "$work/all"; fi | tr '\n' '\0'
     exit 0 ;;
   --heartbeat)
     status="${2:?up|down}"; seconds="${3:-0}"; msg=$(cat)
