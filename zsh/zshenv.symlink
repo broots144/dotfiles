@@ -1,0 +1,7 @@
+# SSH sessions into n0 get no agent of their own. Use the desktop session's launchd ssh-agent
+# (it holds workshop-mini), so lab ssh from a remote session never depends on reading the
+# key's passphrase from the keychain (that path failed intermittently, 2026-10-14).
+if [[ -n $SSH_CONNECTION && -z $SSH_AUTH_SOCK ]]; then
+  for _s in /private/var/run/com.apple.launchd.*/Listeners(N=); do export SSH_AUTH_SOCK=$_s; break; done
+  unset _s
+fi
