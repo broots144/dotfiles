@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+#
+# The MacBook phones home: pull ~/dev from n0 (the Mac Mini, always on, always on the mesh) so
+# the laptop can run the homelab when n0 cannot (sublevel STATE Open 21). The laptop is the
+# initiator because it is the machine that sleeps and travels; n0 never has to find it.
+#
+# What moves, and from where:
+#   - git repos: every repo under ~/dev on n0 is cloned here if missing and fast-forwarded if
+#     present and clean, from a remote named `n0` (ssh), never from GitHub: n0 is already
+#     current, and the laptop then needs no GitHub credentials to stay current. `origin` keeps
+#     the GitHub URL n0 has, for pushing from here once `gh auth login` has been run.
+#     A dirty or diverged checkout is fetched only and reported; nothing here is ever reset.
+#   - private files: what GitHub does not hold (OpenTofu state, tfvars, .env, keys,
+#     gitignored config), the same set lib/dev-tree.sh picks for the iCloud archive, by rsync
+#     with --update: a file newer on this side is never overwritten, it is reported instead
+#     (two local OpenTofu states are the hazard: apply from one machine at a time).
+#   - not here: ~/.ssh and ~/.config/sops (per-device keys, sublevel ADR-018/ADR-069),
+#     Homebrew (sublevel scripts/bootstrap-mac.sh), LaunchAgents (install-launchd.sh scopes
+#     them per host).
+# The run ends with a heartbeat to the Uptime Kuma PUSH monitor `macbook-sync`, relayed through
+# n0 because the laptop cannot reach the lab VLAN from outside the house; silence for three
+# days or a failed run is a warning (not a page) via On Fire.
+#
+# Modes (the last two run ON n0, called over ssh by the sync):
+#   dev-sync-from-n0 [-n]               sync; -n = fetch and report only: no clone, merge, copy or heartbeat
+#   dev-sync-from-n0 --repos            NUL-separated <path>\0<origin url>\0 pairs for every repo
+#   dev-sync-from-n0 --manifest         NUL-separated private-file paths (named + gitignored)
+#   dev-sync-from-n0 --heartbeat up|down <seconds>   message on stdin; pushes to Kuma
+# Run by macos/com.broots.dev-sync-from-n0.plist on the MacBook: at login and every 20 minutes.
+# Exit: 0 ok or n0 unreachable (skipped), 2 wrong host, 3 a repo step failed, 4 rsync failed.
+
+set -uo pipefail
+
+dev="$HOME/dev"
+state="$HOME/.local/state/dev-sync-from-n0"
+sublevel="${SUBLEVEL_DIR:-$HOME/dev/workshop144/sublevel}"
+kuma_url="${KUMA_URL:-https://192.168.10.20:3443}"
+export PATH="/opt/homebrew/bin:$PATH"
+. "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
+
+say() { echo "$(date -u +%FT%TZ) $*"; }
+ssh_n0=(ssh -o BatchMode=yes -o ConnectTimeout=10 n0)
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+export GIT_TERMINAL_PROMPT=0
+
+# --- modes that run on n0 -------------------------------------------------------------------
+case "${1:-}" in
+  --repos)
+    work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+    dev_tree_lists "$dev/" "$work"
+    while IFS= read -r -d '' g; do
+      r="${g%/.git}"
+      printf '%s\0%s\0' "$r" "$("${DEV_TREE_GIT[@]}" -C "$dev/$r" config --get remote.origin.url 2>/dev/null || true)"
+    done < "$work/repos"
+    exit 0 ;;
+  --manifest)
+    work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+    dev_tree_lists "$dev/" "$work"
+    cat "$work/named" "$work/ignored" | sort -zu
+    exit 0 ;;
+  --heartbeat)
+    status="${2:?up|down}"; seconds="${3:-0}"; msg=$(cat)
+    export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
+    token=$(sops -d --extract '["kuma_push_tokens"]["macbook-sync"]' "$sublevel/secrets/monitoring.enc.yaml") || exit 1
+    curl -fsS -m 10 --cacert "$sublevel/stacks/qnap-monitoring/tls/tls.crt" -o /dev/null -G \
+      --data-urlencode "status=$status" --data-urlencode "msg=$msg" --data-urlencode "ping=$seconds" \
+      "$kuma_url/api/push/$token"
+    exit $? ;;
+esac
+
+# --- the sync, on the MacBook ---------------------------------------------------------------
+dry=0; [[ "${1:-}" == "-n" ]] && dry=1
+me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+if [[ "$me" == "n0" ]]; then
+  say "this is n0; the sync runs on the laptop (macos/install-launchd.sh scopes the agent)" >&2
+  exit 2
+fi
+mkdir -p "$state" "$dev"
+
+# One run at a time: a first clone can outlast the 20-minute interval.
+if ! mkdir "$state/lock" 2>/dev/null; then
+  pid=$(cat "$state/lock/pid" 2>/dev/null || true)
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then say "another run (pid $pid) is active; skipped"; exit 0; fi
+  rm -rf "$state/lock"; mkdir "$state/lock" || exit 1
+fi
+echo $$ > "$state/lock/pid"
+work=$(mktemp -d)
+trap 'rm -rf "$work" "$state/lock"' EXIT
+
+if ! "${ssh_n0[@]}" true 2>/dev/null; then
+  say "n0 unreachable; skipped"
+  exit 0
+fi
+
+start=$(date +%s)
+status=0
+repos_ok=0; repos_cloned=0; repos_dirty=0; repos_diverged=0; repos_failed=0
+files_updated=0; files_newer=0
+problems=()
+
+finish() {
+  local secs=$(( $(date +%s) - start )) st=up
+  (( status == 0 )) || st=down
+  local msg="repos: $repos_ok ff, $repos_cloned cloned, $repos_dirty dirty, $repos_diverged diverged, $repos_failed failed; files: $files_updated updated, $files_newer newer here; ${secs}s"
+  if (( dry == 0 )); then
+    printf '{"finished_at":"%s","seconds":%d,"exit":%d,"status":"%s","summary":"%s"}\n' \
+      "$(date -u +%FT%TZ)" "$secs" "$status" "$st" "$msg" > "$state/last.json"
+    if ! printf '%s' "$msg" | "${ssh_n0[@]}" ".dotfiles/bin/dev-sync-from-n0 --heartbeat $st $secs"; then
+      say "heartbeat to Kuma via n0 failed" >&2
+    fi
+  fi
+  say "dev-sync-from-n0 exit=$status $msg"
+  (( ${#problems[@]} == 0 )) || printf '  %s\n' "${problems[@]}"
+  exit "$status"
+}
+
+# Keep the laptop's copy of this script and lib current (public repo over https, no credentials).
+(( dry )) || git -C "${ZSH:-$HOME/.dotfiles}" pull -q --ff-only 2>/dev/null || say "dotfiles pull skipped"
+
+# --- repos ----------------------------------------------------------------------------------
+"${ssh_n0[@]}" .dotfiles/bin/dev-sync-from-n0 --repos > "$work/repos" || { say "could not list repos on n0" >&2; status=3; finish; }
+# Repos nested inside another repo (vendored checkouts) belong to their parent's clone.
+tr '\0' '\n' < "$work/repos" | awk 'NR % 2 == 1' | sort > "$work/repo-paths"
+is_nested() { local p="$1" q; while IFS= read -r q; do [[ "$p" == "$q"/* ]] && return 0; done < "$work/repo-paths"; return 1; }
+
+while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
+  if is_nested "$r"; then continue; fi
+  dst="$dev/$r"
+  if [[ ! -d "$dst/.git" ]]; then
+    if (( dry )); then say "would clone $r"; repos_cloned=$((repos_cloned + 1)); continue; fi
+    if "${DEV_TREE_GIT[@]}" clone -q --origin n0 "n0:dev/$r" "$dst" 2>>"$work/err"; then
+      [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" -C "$dst" remote add origin "$origin"
+      "${DEV_TREE_GIT[@]}" -C "$dst" config remote.pushDefault origin
+      b=$("${DEV_TREE_GIT[@]}" -C "$dst" symbolic-ref --short -q HEAD || true)
+      if [[ -n "$b" && -n "$origin" ]]; then
+        "${DEV_TREE_GIT[@]}" -C "$dst" config "branch.$b.remote" origin
+        "${DEV_TREE_GIT[@]}" -C "$dst" config "branch.$b.merge" "refs/heads/$b"
+      fi
+      say "cloned $r"; repos_cloned=$((repos_cloned + 1))
+    else
+      problems+=("clone failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3
+    fi
+    continue
+  fi
+  g=("${DEV_TREE_GIT[@]}" -C "$dst")
+  # A dry run fetches too (remote-tracking refs only, never the worktree), so it can report.
+  if ! "${g[@]}" remote get-url n0 >/dev/null 2>&1; then "${g[@]}" remote add n0 "n0:dev/$r"; fi
+  if ! "${g[@]}" fetch -q --prune n0 2>>"$work/err"; then
+    problems+=("fetch failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3; continue
+  fi
+  b=$("${g[@]}" symbolic-ref --short -q HEAD || true)
+  if [[ -z "$b" ]]; then problems+=("detached HEAD, fetch only: $r"); repos_dirty=$((repos_dirty + 1)); continue; fi
+  if [[ -n "$("${g[@]}" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    problems+=("dirty, fetch only: $r"); repos_dirty=$((repos_dirty + 1)); continue
+  fi
+  if ! "${g[@]}" rev-parse -q --verify "refs/remotes/n0/$b" >/dev/null; then
+    problems+=("branch $b not on n0, fetch only: $r"); repos_dirty=$((repos_dirty + 1)); continue
+  fi
+  if (( dry )); then
+    n=$("${g[@]}" rev-list --count "HEAD..n0/$b" 2>/dev/null || echo "?")
+    [[ "$n" == "0" ]] || say "would fast-forward $r ($n commits)"
+    repos_ok=$((repos_ok + 1)); continue
+  fi
+  if "${g[@]}" merge -q --ff-only "n0/$b" 2>>"$work/err"; then
+    repos_ok=$((repos_ok + 1))
+  else
+    problems+=("diverged from n0/$b, fetch only: $r"); repos_diverged=$((repos_diverged + 1))
+  fi
+done < "$work/repos"
+
+# --- private files --------------------------------------------------------------------------
+"${ssh_n0[@]}" .dotfiles/bin/dev-sync-from-n0 --manifest > "$work/manifest" || { say "could not list private files on n0" >&2; status=4; finish; }
+# Only into repos that exist here (a failed clone must not leave a stray .env in an empty dir).
+: > "$work/list"
+while IFS= read -r -d '' p; do
+  keep=1
+  while IFS= read -r q; do
+    if [[ "$p" == "$q"/* ]]; then [[ -d "$dev/$q/.git" ]] || keep=0; break; fi
+  done < "$work/repo-paths"
+  (( keep )) && printf '%s\0' "$p"
+done < "$work/manifest" > "$work/list"
+n_list=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
+
+rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "ssh -o BatchMode=yes -o ConnectTimeout=10")
+# Dry run without --update lists every file n0 has changed; the real run with --update skips
+# the ones newer here. The difference is what diverged on this side.
+/usr/bin/rsync -n "${rs[@]:1}" n0:dev/ "$dev/" > "$work/would" 2>>"$work/err" || true
+if (( dry )); then
+  cp "$work/would" "$work/did"
+else
+  "${rs[@]}" -u n0:dev/ "$dev/" > "$work/did" 2>>"$work/err" || { status=4; problems+=("rsync failed: $(tail -1 "$work/err" 2>/dev/null)"); }
+fi
+grep -v '/$' "$work/did" > "$work/did-files" || true
+grep -v '/$' "$work/would" > "$work/would-files" || true
+files_updated=$(grep -c . "$work/did-files" || true)
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  problems+=("newer here than on n0, kept: $f"); files_newer=$((files_newer + 1))
+done < <(grep -vxF -f "$work/did-files" "$work/would-files" || true)
+say "private files: $n_list listed, $files_updated updated"
+
+finish

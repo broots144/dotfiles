@@ -5,6 +5,10 @@
 # Renders each macos/*.plist (rewriting __HOME__ to the real $HOME, since
 # launchd does not expand ~), drops it into ~/Library/LaunchAgents, and
 # (re)bootstraps it into the current GUI session. Idempotent — safe to re-run.
+#
+# A plist that carries `<!-- dotfiles-hosts: a b -->` is installed only on those LocalHostNames
+# (and unloaded/removed elsewhere); one without the marker is installed everywhere. The iCloud
+# backup and the Brewfile reconciler belong to n0; the dev sync to the laptop.
 
 set -euo pipefail
 
@@ -13,11 +17,24 @@ agents_dir="$HOME/Library/LaunchAgents"
 uid="$(id -u)"
 
 mkdir -p "$agents_dir" "$HOME/Library/Logs"
+me="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
 
 shopt -s nullglob
 for src in "$here"/com.broots.*.plist; do
   label="$(basename "$src" .plist)"
   dst="$agents_dir/$label.plist"
+
+  hosts="$(sed -n 's/.*dotfiles-hosts: *\(.*[^ ]\) *-->.*/\1/p' "$src")"
+  if [[ -n "$hosts" ]] && ! grep -qw -- "$me" <<<"$hosts"; then
+    if [[ -e "$dst" ]]; then
+      launchctl bootout "gui/$uid/$label" 2>/dev/null || true
+      rm -f "$dst"
+      echo "removed $label (hosts: $hosts; this is $me)"
+    else
+      echo "skipped $label (hosts: $hosts; this is $me)"
+    fi
+    continue
+  fi
 
   sed "s|__HOME__|$HOME|g" "$src" > "$dst"
 

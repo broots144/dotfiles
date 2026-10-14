@@ -63,80 +63,14 @@ if (( n_src == 0 || n_src * 2 < n_dst )); then
   finish
 fi
 
-# Folders to skip entirely (re-acquirable, tens of GB). '/x/' = top level only, 'x/' = anywhere.
-excludes=(
-  /bulk-youtube-download/
-  /local-image-llm/
-  node_modules/ .venv/ venv/ .terraform/ dist/ .astro/ .next/ .cache/
-  __pycache__/ .pytest_cache/ .ruff_cache/ .mypy_cache/
-  '*.iso' .DS_Store
-)
-# Secret-bearing names: kept out of the plaintext mirror, archived encrypted below.
-# Matched case-insensitively (.ENV, KEY.PEM). A name that turns out to be a directory goes
-# into the archive whole, so nothing it holds is dropped from both copies.
-secret_names=(
-  '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json' '*.tfplan' tfplan plan.out
-  '.env*' '*.env' values.env '*.dev.vars' .dev.vars '*.envrc'
-  '*.pem' '*.key' '*.p12' '*.pfx' '*.p8' '*.ppk' '*.jks' '*.keystore'
-  'id_rsa*' 'id_dsa*' 'id_ecdsa*' 'id_ed25519*'
-  '*keys.txt' '*.kubeconfig' 'kubeconfig*' '*-k3s.yaml' '*-k3s.yml' '*k8s-config*'
-  '*-key.json' '*_key.json' '*serviceaccount*.json' '*service-account*.json'
-  '*service_account*.json' sa.json
-  'token*.json' 'token*.pickle' 'client_secret*.json' 'credentials*' '*secrets*'
-  .git-credentials .netrc .npmrc .pypirc .pgpass .htpasswd '.vault_pass*' '*vault-pass*'
-  '*.local.zsh' '*.local.symlink' 'gitconfig.local*'
-  settings.local.json .mcp.json '*.age' '*.gpg' '*.asc'
-)
-# 'ab' -> '[aA][bB]': rsync patterns are case-sensitive. Portable to macOS bash 3.2.
-nocase() {
-  local p="$1" out="" c lo up i
-  for (( i = 0; i < ${#p}; i++ )); do
-    c="${p:i:1}"
-    lo=$(printf %s "$c" | tr '[:upper:]' '[:lower:]'); up=$(printf %s "$c" | tr '[:lower:]' '[:upper:]')
-    if [[ "$lo" != "$up" ]]; then out+="[$lo$up]"; else out+="$c"; fi
-  done
-  printf %s "$out"
-}
-args=(--exclude .git/)
-for e in "${excludes[@]}"; do args+=(--exclude "$e"); done
-for e in "${secret_names[@]}"; do args+=(--exclude "$(nocase "$e")"); done
-
-# The same bulk folders as find(1) prune rules, and the secret names as -iname tests.
-bulk=()
-for e in "${excludes[@]}"; do
-  case "$e" in
-    /*/) bulk+=(-o -path "./${e:1:${#e}-2}") ;;
-    */)  bulk+=(-o -name "${e%/}") ;;
-  esac
-done
-named=()
-for e in "${secret_names[@]}"; do named+=(-o -iname "$e"); done
-named=( \( "${named[@]:1}" \) )
-
+# What to skip, what is secret-bearing and what is gitignored: lib/dev-tree.sh, shared with
+# bin/dev-sync-from-n0 so both copies of ~/dev carry the same set.
+. "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-# Every list below is NUL-separated, relative to ~/dev, so any legal file name survives.
-strip() { local p; while IFS= read -r -d '' p; do printf '%s\0' "${p#./}"; done; }
-git_safe=(git -c safe.bareRepository=explicit -c core.fsmonitor=false)
-
-(cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) | strip > "$work/named"
-(cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) | strip > "$work/repos"
-
-: > "$work/ignored"; : > "$work/gitcfg"; : > "$work/rules"
-while IFS= read -r -d '' g; do
-  r="${g%/.git}"
-  [[ -f "$src$g/config" ]] && printf '%s\0' "$g/config" >> "$work/gitcfg"
-  # Gitignored files outside ignored directories, up to 1 MiB: never plaintext, always archived.
-  while IFS= read -r -d '' f; do
-    [[ "$f" == */ ]] && continue
-    p="$r/$f"
-    [[ -f "$src$p" && ! -L "$src$p" ]] || continue
-    (( $(stat -f %z "$src$p") <= 1048576 )) || continue
-    printf '%s\0' "$p" >> "$work/ignored"
-    q="${p//\*/\\*}"; q="${q//\?/\\?}"; q="${q//\[/\\[}"
-    printf -- '- /%s\0' "$q" >> "$work/rules"
-  done < <("${git_safe[@]}" -C "$src$r" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null || true)
-done < "$work/repos"
+dev_tree_lists "$src" "$work"
+args=("${DEV_TREE_RSYNC_EXCLUDES[@]}")
+git_safe=("${DEV_TREE_GIT[@]}")
 
 keys="$HOME/.config/sops/age/keys.txt"
 recipient=$(sed -n 's/^# public key: //p' "$keys" 2>/dev/null | head -1)

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent (MacBook only): phone home to n0 and pull ~/dev (repos, OpenTofu state, private
+  config) so the laptop can run the homelab when n0 cannot. See bin/dev-sync-from-n0.
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<!-- dotfiles-hosts: workshop-book -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.dev-sync-from-n0</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.dotfiles/bin/dev-sync-from-n0</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- At login and every 20 minutes while awake; a run with n0 unreachable exits at once. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>1200</integer>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/dev-sync-from-n0.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/dev-sync-from-n0.log</string>
+</dict>
+</plist>
