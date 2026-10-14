@@ -11,7 +11,7 @@
 DEV_TREE_EXCLUDES=(
   /bulk-youtube-download/
   /local-image-llm/
-  node_modules/ .venv/ venv/ .terraform/ dist/ .astro/ .next/ .cache/
+  node_modules/ .venv/ venv/ .terraform/ dist/ .astro/ .next/ .cache/ .aws-sam/
   __pycache__/ .pytest_cache/ .ruff_cache/ .mypy_cache/
   '*.iso' .DS_Store
 )

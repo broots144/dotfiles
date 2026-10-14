@@ -81,6 +81,9 @@ case "${1:-}" in
 esac
 
 # --- the sync, on the MacBook ---------------------------------------------------------------
+# Everything below is one function, so bash has parsed the whole file before it runs: the run
+# pulls the dotfiles repo, which may replace this very file on disk while it executes.
+main() {
 dry=0; [[ "${1:-}" == "-n" ]] && dry=1
 me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
 if [[ "$me" == "n0" ]]; then
@@ -212,3 +215,6 @@ done < <(grep -vxF -f "$work/did-files" "$work/would-files" || true)
 say "private files: $n_list listed, $files_updated updated"
 
 finish
+}
+
+main "$@"
