@@ -7,7 +7,7 @@
   Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
   rewritten to an absolute path at install time (launchd does not expand ~).
 -->
-<!-- dotfiles-hosts: workshop-book -->
+<!-- dotfiles-hosts: book -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
