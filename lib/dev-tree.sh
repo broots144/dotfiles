@@ -66,10 +66,16 @@ dev_tree_repos() {
 # MacBook sync in both directions (bin/dev-sync-from-n0 --manifest on n0, bin/dev-push-to-n0
 # on the laptop), so the two directions carry the same set.
 dev_tree_private_files() {
-  local src="$1" work="$2" g r p
+  local src="$1" work="$2" g r p e skip=""
+  # The bulk/junk names of DEV_TREE_EXCLUDES as one regex: git lists a cache directory's own
+  # .gitignore and the odd .DS_Store as ignored files, and neither is worth carrying.
+  for e in "${DEV_TREE_EXCLUDES[@]}"; do
+    e="${e#/}"; e="${e%/}"; e="${e//./\\.}"; e="${e//\*/.*}"
+    skip+="${skip:+|}(^|/)$e(/|$)"
+  done
   (cd "$src" && cat "$work/named" "$work/ignored" | sort -zu | while IFS= read -r -d '' p; do
     if [[ -d "$p" && ! -L "$p" ]]; then find "$p" -name .git -prune -o -type f -print; else printf '%s\n' "$p"; fi
-  done) | sort -u > "$work/all"
+  done) | grep -vE "$skip" | sort -u > "$work/all"
   while IFS= read -r -d '' g; do
     r="${g%/.git}"
     "${DEV_TREE_GIT[@]}" -C "$src$r" ls-files 2>/dev/null | sed "s|^|$r/|"
