@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
 #
-# The MacBook phones home: pull ~/dev from n0 (the Mac Mini, always on, always on the mesh) so
-# the laptop can run the homelab when n0 cannot (sublevel STATE Open 21). The laptop is the
-# initiator because it is the machine that sleeps and travels; n0 never has to find it.
+# The MacBook phones home: keep ~/dev on the laptop in step with n0 (the Mac Mini, always on,
+# always on the mesh) so the laptop can run the homelab when n0 cannot (sublevel ADR-069,
+# ADR-071). The laptop is the initiator because it is the machine that sleeps and travels.
 #
 # What moves, and from where:
-#   - git repos: every repo under ~/dev on n0 is cloned here if missing and fast-forwarded if
-#     present and clean, from a remote named `n0` (ssh), never from GitHub: n0 is already
-#     current, and the laptop then needs no GitHub credentials to stay current. `origin` keeps
-#     the GitHub URL n0 has, for pushing from here once `gh auth login` has been run.
+#   - git repos: GitHub is the hub (ADR-071). Every repo under ~/dev on n0 (the list n0 computes
+#     with --repos) is cloned here if missing, from its GitHub `origin` (ssh; n0's https URL is
+#     rewritten) or from n0 when it has no origin, and then bin/dev-pull fast-forwards every
+#     clean checkout from origin. n0 is the fallback: a repo with no origin, or whose origin
+#     fetch failed (GitHub down, hotel network), is fast-forwarded from `n0/<branch>` instead.
 #     A dirty or diverged checkout is fetched only and reported; nothing here is ever reset.
-#   - private files: what git does not hold (OpenTofu state, tfvars, .env, keys,
-#     gitignored config), the same set lib/dev-tree.sh picks for the iCloud archive minus
-#     tracked files (those come with the repos), by rsync
-#     with --update: a file newer on this side is never overwritten, it is reported instead
-#     (two local OpenTofu states are the hazard: apply from one machine at a time).
+#     Work done on the laptop goes back the way git does it: commit, push, and n0's own
+#     dev-pull picks it up within 20 minutes.
+#   - private files: what git does not hold (OpenTofu state, tfvars, .env, keys, gitignored
+#     config), the set lib/dev-tree.sh picks for the iCloud archive minus tracked files, by
+#     rsync with --update: a file newer on this side is never overwritten, it is reported
+#     instead. bin/dev-push-to-n0 carries such files back to n0 (by hand, when home from a trip).
+#     Two local OpenTofu states are the hazard: apply from one machine at a time.
 #   - not here: ~/.ssh and ~/.config/sops (per-device keys, sublevel ADR-018/ADR-069),
 #     Homebrew (sublevel scripts/bootstrap-mac.sh), LaunchAgents (install-launchd.sh scopes
-#     them per host).
+#     them per host), and the repos in SYNC_SKIP below (n0-only by decision).
 # The run ends with a heartbeat to the Uptime Kuma PUSH monitor `macbook-sync`, relayed through
 # n0 because the laptop cannot reach the lab VLAN from outside the house; silence for three
 # days or a failed run is a warning (not a page) via On Fire.
 #
-# Modes (the last two run ON n0, called over ssh by the sync):
+# Modes (the last three run ON n0, called over ssh by the sync and by dev-push-to-n0):
 #   dev-sync-from-n0 [-n]               sync; -n = fetch and report only: no clone, merge, copy or heartbeat
 #   dev-sync-from-n0 --repos            NUL-separated <path>\0<origin url>\0 pairs for every repo
 #   dev-sync-from-n0 --manifest         NUL-separated private-file paths (named + gitignored)
@@ -39,6 +42,10 @@ kuma_url="${KUMA_URL:-https://192.168.10.20:3443}"
 export PATH="/opt/homebrew/bin:$PATH"
 . "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
 
+# Repos that live on n0 only (operator decision 2026-10-14): not listed, not copied either way.
+SYNC_SKIP=(nightshift)
+sync_skipped() { local r="$1" s; for s in "${SYNC_SKIP[@]}"; do [[ "$r" == "$s" || "$r" == "$s"/* ]] && return 0; done; return 1; }
+
 say() { echo "$(date -u +%FT%TZ) $*"; }
 ssh_n0=(ssh -o BatchMode=yes -o ConnectTimeout=10 n0)
 export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
@@ -48,27 +55,19 @@ export GIT_TERMINAL_PROMPT=0
 case "${1:-}" in
   --repos)
     work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
-    dev_tree_lists "$dev/" "$work"
+    dev_tree_repos "$dev/" "$work/repos"
     while IFS= read -r -d '' g; do
       r="${g%/.git}"
+      sync_skipped "$r" && continue
       printf '%s\0%s\0' "$r" "$("${DEV_TREE_GIT[@]}" -C "$dev/$r" config --get remote.origin.url 2>/dev/null || true)"
     done < "$work/repos"
     exit 0 ;;
   --manifest)
     work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
     dev_tree_lists "$dev/" "$work"
-    # Directories expand to their files so tracked files inside them can be dropped too.
-    # Newline-separated from here on (a file name holding a newline is not a case in ~/dev).
-    (cd "$dev" && cat "$work/named" "$work/ignored" | sort -zu | while IFS= read -r -d '' p; do
-      if [[ -d "$p" && ! -L "$p" ]]; then find "$p" -name .git -prune -o -type f -print; else printf '%s\n' "$p"; fi
-    done) | sort -u > "$work/all"
-    # Git carries tracked files (the clone / fast-forward step above); only what git does not
-    # carry moves by rsync. Otherwise an uncommitted edit on n0 would dirty the laptop's checkout.
-    while IFS= read -r -d '' g; do
-      r="${g%/.git}"
-      "${DEV_TREE_GIT[@]}" -C "$dev/$r" ls-files 2>/dev/null | sed "s|^|$r/|"
-    done < "$work/repos" | sort -u > "$work/tracked"
-    if [[ -s "$work/tracked" ]]; then grep -vxF -f "$work/tracked" "$work/all"; else cat "$work/all"; fi | tr '\n' '\0'
+    dev_tree_private_files "$dev/" "$work" | while IFS= read -r -d '' p; do
+      sync_skipped "$p" || printf '%s\0' "$p"
+    done
     exit 0 ;;
   --heartbeat)
     status="${2:?up|down}"; seconds="${3:-0}"; msg=$(cat)
@@ -109,14 +108,15 @@ fi
 
 start=$(date +%s)
 status=0
-repos_ok=0; repos_cloned=0; repos_dirty=0; repos_diverged=0; repos_failed=0
+pull_summary="dev-pull: not run"
+repos_cloned=0; repos_n0ff=0; repos_failed=0
 files_updated=0; files_newer=0
 problems=()
 
 finish() {
   local secs=$(( $(date +%s) - start )) st=up
   (( status == 0 )) || st=down
-  local msg="repos: $repos_ok ff, $repos_cloned cloned, $repos_dirty dirty, $repos_diverged diverged, $repos_failed failed; files: $files_updated updated, $files_newer newer here; ${secs}s"
+  local msg="$pull_summary; n0: $repos_cloned cloned, $repos_n0ff ff (fallback), $repos_failed failed; files: $files_updated updated, $files_newer newer here; ${secs}s"
   if (( dry == 0 )); then
     printf '{"finished_at":"%s","seconds":%d,"exit":%d,"status":"%s","summary":"%s"}\n' \
       "$(date -u +%FT%TZ)" "$secs" "$status" "$st" "$msg" > "$state/last.json"
@@ -129,57 +129,76 @@ finish() {
   exit "$status"
 }
 
-# Keep the laptop's copy of this script and lib current (public repo over https, no credentials).
+# Keep the laptop's copy of this script and lib current before anything else.
 (( dry )) || git -C "${ZSH:-$HOME/.dotfiles}" pull -q --ff-only 2>/dev/null || say "dotfiles pull skipped"
 
-# --- repos ----------------------------------------------------------------------------------
+# --- repos: clone what is missing ------------------------------------------------------------
 "${ssh_n0[@]}" .dotfiles/bin/dev-sync-from-n0 --repos > "$work/repos" || { say "could not list repos on n0" >&2; status=3; finish; }
 # Repos nested inside another repo (vendored checkouts) belong to their parent's clone.
 tr '\0' '\n' < "$work/repos" | awk 'NR % 2 == 1' | sort > "$work/repo-paths"
 is_nested() { local p="$1" q; while IFS= read -r q; do [[ "$p" == "$q"/* ]] && return 0; done < "$work/repo-paths"; return 1; }
+# The laptop authenticates to GitHub with its ssh key (ssh.github.com:443 in ~/.ssh/config);
+# n0 holds https URLs and a keychain token the laptop does not have.
+ssh_url() { printf '%s' "$1" | sed -E 's#^https://github\.com/#git@github.com:#'; }
 
 while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
-  if is_nested "$r"; then continue; fi
+  is_nested "$r" && continue
   dst="$dev/$r"
   if [[ ! -d "$dst/.git" ]]; then
     if (( dry )); then say "would clone $r"; repos_cloned=$((repos_cloned + 1)); continue; fi
-    if "${DEV_TREE_GIT[@]}" clone -q --origin n0 "n0:dev/$r" "$dst" 2>>"$work/err"; then
-      [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" -C "$dst" remote add origin "$origin"
-      "${DEV_TREE_GIT[@]}" -C "$dst" config remote.pushDefault origin
-      b=$("${DEV_TREE_GIT[@]}" -C "$dst" symbolic-ref --short -q HEAD || true)
-      if [[ -n "$b" && -n "$origin" ]]; then
-        "${DEV_TREE_GIT[@]}" -C "$dst" config "branch.$b.remote" origin
-        "${DEV_TREE_GIT[@]}" -C "$dst" config "branch.$b.merge" "refs/heads/$b"
-      fi
-      say "cloned $r"; repos_cloned=$((repos_cloned + 1))
+    if [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" clone -q "$(ssh_url "$origin")" "$dst" 2>>"$work/err"; then
+      "${DEV_TREE_GIT[@]}" -C "$dst" remote add n0 "n0:dev/$r"
+      say "cloned $r from origin"; repos_cloned=$((repos_cloned + 1))
+    elif "${DEV_TREE_GIT[@]}" clone -q --origin n0 "n0:dev/$r" "$dst" 2>>"$work/err"; then
+      [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" -C "$dst" remote add origin "$(ssh_url "$origin")"
+      say "cloned $r from n0"; repos_cloned=$((repos_cloned + 1))
     else
       problems+=("clone failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3
+      continue
+    fi
+    "${DEV_TREE_GIT[@]}" -C "$dst" config remote.pushDefault origin
+    b=$("${DEV_TREE_GIT[@]}" -C "$dst" symbolic-ref --short -q HEAD || true)
+    if [[ -n "$b" && -n "$origin" ]]; then
+      "${DEV_TREE_GIT[@]}" -C "$dst" config "branch.$b.remote" origin
+      "${DEV_TREE_GIT[@]}" -C "$dst" config "branch.$b.merge" "refs/heads/$b"
     fi
     continue
   fi
   g=("${DEV_TREE_GIT[@]}" -C "$dst")
-  # A dry run fetches too (remote-tracking refs only, never the worktree), so it can report.
-  if ! "${g[@]}" remote get-url n0 >/dev/null 2>&1; then "${g[@]}" remote add n0 "n0:dev/$r"; fi
+  "${g[@]}" remote get-url n0 >/dev/null 2>&1 || "${g[@]}" remote add n0 "n0:dev/$r"
+  if [[ -n "$origin" ]] && ! "${g[@]}" remote get-url origin >/dev/null 2>&1; then
+    "${g[@]}" remote add origin "$(ssh_url "$origin")"
+  fi
+done < "$work/repos"
+
+# --- repos: fast-forward from GitHub, n0 as fallback ------------------------------------------
+pull_args=(-q); (( dry )) && pull_args+=(-n)
+"${ZSH:-$HOME/.dotfiles}/bin/dev-pull" "${pull_args[@]}" > "$work/pull.out" 2>&1
+pull_summary=$(grep -o 'dev-pull: .*' "$work/pull.out" | tail -1)
+[[ -n "$pull_summary" ]] || { pull_summary="dev-pull: no summary"; status=3; }
+while IFS= read -r line; do problems+=("${line#  }"); done < <(grep '^  ' "$work/pull.out" || true)
+
+# A repo without origin, or whose origin fetch failed, follows n0 instead.
+while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
+  is_nested "$r" && continue
+  dst="$dev/$r"; [[ -d "$dst/.git" ]] || continue
+  g=("${DEV_TREE_GIT[@]}" -C "$dst")
+  res=$(awk -F '\t' -v r="$r" '$1 == r {print $2}' "$HOME/.local/state/dev-pull/results" 2>/dev/null)
+  [[ "$res" == "no-origin" || "$res" == "failed" ]] || continue
   if ! "${g[@]}" fetch -q --prune n0 2>>"$work/err"; then
-    problems+=("fetch failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3; continue
+    problems+=("fetch from n0 failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3; continue
   fi
   b=$("${g[@]}" symbolic-ref --short -q HEAD || true)
-  if [[ -z "$b" ]]; then problems+=("detached HEAD, fetch only: $r"); repos_dirty=$((repos_dirty + 1)); continue; fi
-  if [[ -n "$("${g[@]}" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
-    problems+=("dirty, fetch only: $r"); repos_dirty=$((repos_dirty + 1)); continue
-  fi
-  if ! "${g[@]}" rev-parse -q --verify "refs/remotes/n0/$b" >/dev/null; then
-    problems+=("branch $b not on n0, fetch only: $r"); repos_dirty=$((repos_dirty + 1)); continue
-  fi
-  if (( dry )); then
-    n=$("${g[@]}" rev-list --count "HEAD..n0/$b" 2>/dev/null || echo "?")
-    [[ "$n" == "0" ]] || say "would fast-forward $r ($n commits)"
-    repos_ok=$((repos_ok + 1)); continue
-  fi
+  [[ -n "$b" ]] || continue
+  [[ -z "$("${g[@]}" status --porcelain --untracked-files=no 2>/dev/null)" ]] || continue
+  "${g[@]}" rev-parse -q --verify "refs/remotes/n0/$b" >/dev/null || { problems+=("branch $b not on n0, fetch only: $r"); continue; }
+  n=$("${g[@]}" rev-list --count "HEAD..n0/$b" 2>/dev/null || echo 0)
+  [[ "$n" == "0" ]] && continue
+  if (( dry )); then say "would fast-forward $r from n0 ($n commits)"; repos_n0ff=$((repos_n0ff + 1)); continue; fi
   if "${g[@]}" merge -q --ff-only "n0/$b" 2>>"$work/err"; then
-    repos_ok=$((repos_ok + 1))
+    say "fast-forwarded $r from n0 ($n commits)"; repos_n0ff=$((repos_n0ff + 1))
   else
-    problems+=("diverged from n0/$b, fetch only: $r"); repos_diverged=$((repos_diverged + 1))
+    problems+=("diverged from n0/$b, fetch only: $r")
   fi
 done < "$work/repos"
 
@@ -198,7 +217,7 @@ n_list=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
 
 rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "ssh -o BatchMode=yes -o ConnectTimeout=10")
 # Dry run without --update lists every file n0 has changed; the real run with --update skips
-# the ones newer here. The difference is what diverged on this side.
+# the ones newer here. The difference is what diverged on this side (dev-push-to-n0 carries it back).
 /usr/bin/rsync -n "${rs[@]:1}" n0:dev/ "$dev/" > "$work/would" 2>>"$work/err" || true
 if (( dry )); then
   cp "$work/would" "$work/did"
@@ -213,6 +232,7 @@ while IFS= read -r f; do
   problems+=("newer here than on n0, kept: $f"); files_newer=$((files_newer + 1))
 done < <(grep -vxF -f "$work/did-files" "$work/would-files" || true)
 say "private files: $n_list listed, $files_updated updated"
+(( files_newer == 0 )) || say "$files_newer file(s) newer here: run dev-push-to-n0 -n to see them, dev-push-to-n0 to carry them to n0"
 
 finish
 }

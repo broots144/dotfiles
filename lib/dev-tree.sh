@@ -46,6 +46,37 @@ dev_tree_nocase() {
 # Every git call isolated from repo-local executable config.
 DEV_TREE_GIT=(git -c safe.bareRepository=explicit -c core.fsmonitor=false)
 
+# dev_tree_repos <src/> <outfile>: NUL-separated list of every .git directory under <src>
+# (nested ones too), relative to <src>, bulk folders pruned. The repo half of dev_tree_lists,
+# on its own because bin/dev-pull needs only this and the ignored-file scan is slow.
+dev_tree_repos() {
+  local src="$1" out="$2" e bulk=()
+  for e in "${DEV_TREE_EXCLUDES[@]}"; do
+    case "$e" in
+      /*/) bulk+=(-o -path "./${e:1:${#e}-2}") ;;
+      */)  bulk+=(-o -name "${e%/}") ;;
+    esac
+  done
+  (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) | dev_tree_strip > "$out"
+}
+
+# dev_tree_private_files <src/> <workdir>: NUL-separated paths of what git does not carry:
+# the named + gitignored set from dev_tree_lists minus every tracked file (directories in the
+# named set expand to their files). Needs dev_tree_lists output in <workdir>. Used by the
+# MacBook sync in both directions (bin/dev-sync-from-n0 --manifest on n0, bin/dev-push-to-n0
+# on the laptop), so the two directions carry the same set.
+dev_tree_private_files() {
+  local src="$1" work="$2" g r p
+  (cd "$src" && cat "$work/named" "$work/ignored" | sort -zu | while IFS= read -r -d '' p; do
+    if [[ -d "$p" && ! -L "$p" ]]; then find "$p" -name .git -prune -o -type f -print; else printf '%s\n' "$p"; fi
+  done) | sort -u > "$work/all"
+  while IFS= read -r -d '' g; do
+    r="${g%/.git}"
+    "${DEV_TREE_GIT[@]}" -C "$src$r" ls-files 2>/dev/null | sed "s|^|$r/|"
+  done < "$work/repos" | sort -u > "$work/tracked"
+  if [[ -s "$work/tracked" ]]; then grep -vxF -f "$work/tracked" "$work/all"; else cat "$work/all"; fi | tr '\n' '\0'
+}
+
 # dev_tree_lists <src/> <workdir>: writes NUL-separated lists, relative to <src>, into <workdir>:
 #   repos    every .git directory (nested ones too), bulk folders pruned
 #   named    files and directories with a secret-bearing name (bulk folders and .git pruned)
@@ -73,7 +104,7 @@ dev_tree_lists() {
 
   # Lists are NUL-separated so any legal file name survives.
   (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) | dev_tree_strip > "$work/named"
-  (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) | dev_tree_strip > "$work/repos"
+  dev_tree_repos "$src" "$work/repos"
 
   : > "$work/ignored"; : > "$work/gitcfg"; : > "$work/rules"
   while IFS= read -r -d '' g; do

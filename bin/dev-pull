@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+#
+# Keep every git repo under ~/dev current from GitHub (`origin`). GitHub is the hub (sublevel
+# ADR-071): CI, night-shift agents and both admin machines merge there, so a machine that only
+# mirrored another machine fell behind (n0 was behind on six repos on 2026-10-14 while holding
+# nothing unpushed). Runs on n0 every 20 minutes (macos/com.broots.dev-pull.plist) and is the
+# git step of bin/dev-sync-from-n0 on the MacBook.
+#
+# Per repo (nested/vendored checkouts skipped; bulk folders from lib/dev-tree.sh pruned):
+#   - no `origin`:                          reported (no-origin), nothing fetched
+#   - fetch origin fails:                   reported (failed), exit 3 at the end
+#   - detached HEAD, branch missing on origin, or diverged: fetched, reported, never reset
+#   - clean and origin/<branch> is ahead:   fast-forwarded
+#   - dirty (edits, or new files not yet added): fetched, reported, and the working tree is
+#     snapshotted to `refs/wip/<this host>` on origin (own GitHub repos only), so uncommitted
+#     work, new files included, exists off this machine within 20 minutes and the other admin
+#     machine sees it (`git fetch origin` brings refs/wip/*; `git diff HEAD wip/n0`,
+#     `git restore --source=wip/n0 --worktree -- .`). The snapshot is one commit on top of HEAD,
+#     force-updated when the tree changes, deleted when the checkout is clean again. Left out of
+#     it: ignored files (git's own rule), files with a secret-bearing name (lib/dev-tree.sh,
+#     rsync carries those), untracked files over 1 MiB, and anything gitleaks flags (then the
+#     snapshot is withheld and reported). Never the working tree, index, branches or stash.
+# Nothing here ever resets, rebases, stashes, or touches a branch.
+#
+# dev-pull [-n] [-q]    -n: fetch and report only, no merge, no snapshot.  -q: summary line only.
+# Writes ~/.local/state/dev-pull/results (one "<repo>\t<status>" line per repo; status is one
+# of ff, current, dirty, detached, diverged, no-branch, no-origin, failed) and last.json;
+# prints "dev-pull: N ff, M current, ..." last. Exit 3 if any fetch failed, else 0.
+
+set -uo pipefail
+
+dev="$HOME/dev"
+state="$HOME/.local/state/dev-pull"
+export PATH="/opt/homebrew/bin:$PATH"
+. "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
+
+dry=0; quiet=0
+for a in "$@"; do case "$a" in -n) dry=1 ;; -q) quiet=1 ;; *) echo "usage: dev-pull [-n] [-q]" >&2; exit 64 ;; esac; done
+
+say() { echo "$(date -u +%FT%TZ) $*"; }
+# Never prompt (a LaunchAgent has no terminal), never hang on a dead link.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+git_q=("${DEV_TREE_GIT[@]}" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30)
+
+me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+mkdir -p "$state/wip"
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+
+# Snapshot a dirty checkout to refs/wip/$me on origin. Own repos only (the fork of someone
+# else's project has no push rights and its WIP is not ours to publish).
+wip_ref="refs/wip/$me"
+own_repo() { "${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | grep -qE '^(git@github\.com:|https://github\.com/)(broots144|workshop144)/'; }
+wip_snapshot() {  # <repo> <branch>; sets wip_msg
+  local r="$1" b="$2" dst="$dev/$1" idx="$work/idx" rec="$state/wip/${1//\//__}" tree last commit ex=() e f n_new n_mod
+  rm -f "$idx"
+  local g=("${git_q[@]}" -C "$dst")
+  export GIT_INDEX_FILE="$idx"
+  "${g[@]}" read-tree HEAD || { unset GIT_INDEX_FILE; wip_msg="snapshot failed (read-tree): $r"; return 1; }
+  for e in "${DEV_TREE_SECRET_NAMES[@]}"; do ex+=(":(exclude,icase,glob)**/$e"); done
+  while IFS= read -r -d '' f; do
+    [[ -f "$dst/$f" && ! -L "$dst/$f" ]] || continue
+    (( $(stat -f %z "$dst/$f") > 1048576 )) && ex+=(":(exclude)$f")
+  done < <("${g[@]}" ls-files -z --others --exclude-standard 2>/dev/null)
+  "${g[@]}" add -A -- . "${ex[@]}" 2>"$work/err" || { unset GIT_INDEX_FILE; wip_msg="snapshot failed (add): $r ($(grep -m1 . "$work/err"))"; return 1; }
+  tree=$("${g[@]}" write-tree); unset GIT_INDEX_FILE
+  if [[ "$tree" == "$("${g[@]}" rev-parse 'HEAD^{tree}')" ]]; then wip_msg="dirty only by excluded files, no snapshot: $r"; wip_clear "$r"; return 0; fi
+  last=$(cat "$rec" 2>/dev/null || true)
+  if [[ "$tree" == "${last%% *}" ]]; then wip_msg="snapshot unchanged: $r"; return 0; fi
+  n_mod=$("${g[@]}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
+  n_new=$("${g[@]}" ls-files --others --exclude-standard | wc -l | tr -d ' ')
+  commit=$(printf 'wip(%s): %s, %s modified, %s new, %s\n\nSnapshot by dev-pull; not a branch. Secret-named and >1 MiB files left out.\n' \
+    "$me" "$b" "$n_mod" "$n_new" "$(date -u +%FT%TZ)" | "${g[@]}" commit-tree "$tree" -p HEAD) || { wip_msg="snapshot failed (commit-tree): $r"; return 1; }
+  if command -v gitleaks >/dev/null && ! gitleaks git --no-banner --exit-code 1 --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
+    wip_msg="snapshot withheld, gitleaks finding: $r (gitleaks git --log-opts='$commit^!' $dst)"; return 1
+  fi
+  if "${g[@]}" push -q --force origin "$commit:$wip_ref" 2>"$work/err"; then
+    echo "$tree $commit" > "$rec"; wip_msg="snapshot pushed to $wip_ref: $r ($n_mod modified, $n_new new)"; return 0
+  fi
+  wip_msg="snapshot push failed: $r ($(grep -m1 . "$work/err"))"; return 1
+}
+wip_clear() {  # <repo>: the checkout is clean again; the snapshot ref says otherwise, so drop it
+  local r="$1" rec="$state/wip/${1//\//__}"
+  [[ -e "$rec" ]] || return 0
+  "${git_q[@]}" -C "$dev/$r" push -q origin ":$wip_ref" 2>/dev/null; rm -f "$rec"
+}
+# Make the other host's snapshots fetchable (`git fetch origin` brings refs/wip/*).
+wip_fetchspec() { local g=("${git_q[@]}" -C "$1"); "${g[@]}" config --get-all remote.origin.fetch | grep -qx '+refs/wip/\*:refs/wip/\*' || "${g[@]}" config --add remote.origin.fetch '+refs/wip/*:refs/wip/*'; }
+dev_tree_repos "$dev/" "$work/repos"
+tr '\0' '\n' < "$work/repos" | sed 's|/\.git$||' | sort > "$work/paths"
+is_nested() { local p="$1" q; while IFS= read -r q; do [[ "$p" == "$q"/* ]] && return 0; done < "$work/paths"; return 1; }
+
+n_ff=0 n_cur=0 n_dirty=0 n_div=0 n_noorig=0 n_fail=0
+: > "$state/results.new"
+problems=()
+note() { printf '%s\t%s\n' "$1" "$2" >> "$state/results.new"; }
+
+while IFS= read -r r; do
+  is_nested "$r" && continue
+  g=("${git_q[@]}" -C "$dev/$r")
+  if ! "${g[@]}" remote get-url origin >/dev/null 2>&1; then
+    note "$r" no-origin; n_noorig=$((n_noorig + 1)); continue
+  fi
+  own_repo "$dev/$r" && wip_fetchspec "$dev/$r"
+  if ! "${g[@]}" fetch -q --prune origin </dev/null 2>"$work/err"; then
+    note "$r" failed; n_fail=$((n_fail + 1))
+    problems+=("fetch failed: $r ($(grep -m1 . "$work/err" 2>/dev/null))"); continue
+  fi
+  b=$("${g[@]}" symbolic-ref --short -q HEAD || true)
+  if [[ -z "$b" ]]; then note "$r" detached; n_dirty=$((n_dirty + 1)); problems+=("detached HEAD, fetch only: $r"); continue; fi
+  if [[ -n "$("${g[@]}" status --porcelain 2>/dev/null)" ]]; then
+    note "$r" dirty; n_dirty=$((n_dirty + 1))
+    if (( dry )); then problems+=("dirty, fetch only (would snapshot): $r")
+    elif own_repo "$dev/$r" && [[ -n "$b" ]]; then wip_snapshot "$r" "$b"; problems+=("dirty, fetch only; $wip_msg")
+    else problems+=("dirty, fetch only: $r"); fi
+    continue
+  fi
+  (( dry )) || wip_clear "$r"
+  if ! "${g[@]}" rev-parse -q --verify "refs/remotes/origin/$b" >/dev/null; then
+    note "$r" no-branch; n_dirty=$((n_dirty + 1)); problems+=("branch $b not on origin, fetch only: $r"); continue
+  fi
+  behind=$("${g[@]}" rev-list --count "HEAD..origin/$b" 2>/dev/null || echo 0)
+  if [[ "$behind" == "0" ]]; then note "$r" current; n_cur=$((n_cur + 1)); continue; fi
+  if (( dry )); then
+    (( quiet )) || say "would fast-forward $r ($behind commits)"
+    note "$r" ff; n_ff=$((n_ff + 1)); continue
+  fi
+  if "${g[@]}" merge -q --ff-only "origin/$b" 2>"$work/err"; then
+    (( quiet )) || say "fast-forwarded $r ($behind commits) -> $("${g[@]}" log --oneline -1)"
+    note "$r" ff; n_ff=$((n_ff + 1))
+  else
+    note "$r" diverged; n_div=$((n_div + 1)); problems+=("diverged from origin/$b, fetch only: $r")
+  fi
+done < "$work/paths"
+
+mv "$state/results.new" "$state/results"
+status=0; (( n_fail == 0 )) || status=3
+summary="dev-pull: $n_ff ff, $n_cur current, $n_dirty dirty, $n_div diverged, $n_noorig no-origin, $n_fail failed"
+printf '{"finished_at":"%s","exit":%d,"summary":"%s"}\n' "$(date -u +%FT%TZ)" "$status" "$summary" > "$state/last.json"
+say "$summary"
+(( ${#problems[@]} == 0 )) || printf '  %s\n' "${problems[@]}"
+exit "$status"

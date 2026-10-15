@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent (n0 only): fast-forward every clean repo under ~/dev from GitHub and push a
+  snapshot of every dirty one to refs/wip/n0 (sublevel ADR-071). See bin/dev-pull. On the
+  MacBook the same script runs as a step of dev-sync-from-n0, so no agent there.
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<!-- dotfiles-hosts: n0 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.dev-pull</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.dotfiles/bin/dev-pull</string>
+        <string>-q</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- At login and every 20 minutes. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>1200</integer>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/dev-pull.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/dev-pull.log</string>
+</dict>
+</plist>

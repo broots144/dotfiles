@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# Carry private files from the MacBook back to n0 (sublevel ADR-071): the files git does not
+# hold (OpenTofu state, tfvars, .env, keys, gitignored config) that changed here, after work
+# away from home. The reverse of the private-file half of bin/dev-sync-from-n0, same manifest
+# rules (lib/dev-tree.sh, computed from this laptop's tree so a file created here is included),
+# same rsync --update: a file newer on n0 is never overwritten, it is listed instead.
+# Nothing is deleted on either side. Tracked files never move this way: commit and push them,
+# n0's dev-pull takes it from there (that is the two-way sync for code).
+#
+# By hand, not scheduled: the OpenTofu state is the reason (apply from one machine at a time;
+# look at the -n list before moving a state file), and n0 is the primary.
+#
+#   dev-push-to-n0 -n    list what would move (and what n0 has newer)
+#   dev-push-to-n0       move it
+# Exit: 1 n0 unreachable, 2 wrong host, 4 rsync failed.
+
+set -uo pipefail
+
+dev="$HOME/dev"
+export PATH="/opt/homebrew/bin:$PATH"
+. "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
+SYNC_SKIP=(nightshift)   # keep in step with dev-sync-from-n0
+sync_skipped() { local r="$1" s; for s in "${SYNC_SKIP[@]}"; do [[ "$r" == "$s" || "$r" == "$s"/* ]] && return 0; done; return 1; }
+
+dry=0; [[ "${1:-}" == "-n" ]] && dry=1
+me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+[[ "$me" != "n0" ]] || { echo "this is n0" >&2; exit 2; }
+ssh -o BatchMode=yes -o ConnectTimeout=10 n0 true 2>/dev/null || { echo "n0 unreachable" >&2; exit 1; }
+
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+dev_tree_lists "$dev/" "$work"
+dev_tree_private_files "$dev/" "$work" | while IFS= read -r -d '' p; do
+  sync_skipped "$p" || printf '%s\0' "$p"
+done > "$work/list"
+n=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
+
+rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "ssh -o BatchMode=yes -o ConnectTimeout=10")
+# Without --update: everything that differs. With --update: only what is newer here.
+/usr/bin/rsync -n "${rs[@]:1}" "$dev/" n0:dev/ 2>"$work/err" | grep -v '/$' > "$work/differs" || true
+/usr/bin/rsync -n "${rs[@]:1}" -u "$dev/" n0:dev/ 2>>"$work/err" | grep -v '/$' > "$work/newer-here" || true
+grep -vxF -f "$work/newer-here" "$work/differs" > "$work/newer-on-n0" || true
+
+echo "$n private files listed here"
+if [[ -s "$work/newer-here" ]]; then
+  echo "newer here, $([[ $dry == 1 ]] && echo 'would move' || echo 'moving') to n0:"; sed 's/^/  /' "$work/newer-here"
+else
+  echo "nothing newer here"
+fi
+if [[ -s "$work/newer-on-n0" ]]; then
+  echo "newer on n0, left alone (dev-sync-from-n0 brings them here):"; sed 's/^/  /' "$work/newer-on-n0"
+fi
+grep -q 'tfstate' "$work/newer-here" && echo "NOTE: an OpenTofu state is among them; make sure nothing was applied from n0 since."
+(( dry )) && exit 0
+[[ -s "$work/newer-here" ]] || exit 0
+"${rs[@]}" -u "$dev/" n0:dev/ > "$work/did" 2>>"$work/err" || { echo "rsync failed: $(tail -1 "$work/err")" >&2; exit 4; }
+echo "moved $(grep -vc '/$' "$work/did" || true) file(s) to n0"
