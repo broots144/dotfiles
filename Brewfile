@@ -2,6 +2,8 @@
 tap "broots144/tap"
 
 # CLI tools
+brew "xz"
+brew "e2fsprogs"
 brew "zbar"
 brew "gnu-tar"
 brew "actionlint"
