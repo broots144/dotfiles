@@ -1,4 +1,5 @@
 # Taps
+tap "knative-extensions/kn-plugins"
 tap "knative/client"
 tap "broots144/tap"
 
