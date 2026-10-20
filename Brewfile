@@ -4,6 +4,8 @@ tap "knative/client"
 tap "broots144/tap"
 
 # CLI tools
+brew "knative-extensions/kn-plugins/func"
+brew "knative/client/kn"
 brew "xz"
 brew "e2fsprogs"
 brew "zbar"
