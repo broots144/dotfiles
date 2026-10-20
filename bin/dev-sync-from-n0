@@ -18,7 +18,9 @@
 #     rsync with --update: a file newer on this side is never overwritten, it is reported
 #     instead. bin/dev-push-to-n0 carries such files back to n0 (by hand, when home from a trip).
 #     Two local OpenTofu states are the hazard: apply from one machine at a time.
-#   - not here: ~/.ssh and ~/.config/sops (per-device keys, sublevel ADR-018/ADR-069),
+#   - rendered here, not copied: ~/.ssh/sublevel.conf (sublevel scripts/ssh-config.sh, when the
+#     inventory or pinned host keys changed) and ~/.kube/turingpi.yaml (once, from tp1).
+#   - not here: ~/.ssh keys and ~/.config/sops (per-device keys, sublevel ADR-018/ADR-069),
 #     Homebrew (sublevel scripts/bootstrap-mac.sh), LaunchAgents (install-launchd.sh scopes
 #     them per host), and the repos in SYNC_SKIP below (n0-only by decision).
 # The run ends with a heartbeat to the Uptime Kuma PUSH monitor `macbook-sync`, relayed through
@@ -233,6 +235,29 @@ while IFS= read -r f; do
 done < <(grep -vxF -f "$work/did-files" "$work/would-files" || true)
 say "private files: $n_list listed, $files_updated updated"
 (( files_newer == 0 )) || say "$files_newer file(s) newer here: run dev-push-to-n0 -n to see them, dev-push-to-n0 to carry them to n0"
+
+# --- sublevel access files (ADR-069): rendered here, from the synced repo -----------------------
+# ~/.ssh/sublevel.conf follows the inventory and the pinned host keys (re-rendered when either is
+# newer); the Turing Pi kubeconfig is fetched once from tp1 over the laptop's own key.
+if (( ! dry )) && [[ -d "$sublevel/.git" ]]; then
+  [[ -f "$HOME/.ssh/book" ]] && export SUBLEVEL_ADMIN_KEY="${SUBLEVEL_ADMIN_KEY:-$HOME/.ssh/book}"
+  conf="$HOME/.ssh/sublevel.conf"
+  if [[ ! -f "$conf" || "$sublevel/ansible/inventory.yml" -nt "$conf" || "$sublevel/ansible/known_hosts" -nt "$conf" ]]; then
+    if "$sublevel/scripts/ssh-config.sh" > "$work/sshcfg" 2>&1; then
+      say "ssh-config: $(tail -1 "$work/sshcfg")"
+    else
+      problems+=("ssh-config failed: $(tail -1 "$work/sshcfg")"); status=3
+    fi
+  fi
+  kc="$HOME/.kube/turingpi.yaml"
+  if [[ ! -f "$kc" ]]; then
+    if (cd "$sublevel" && just turingpi --tags kubeconfig) > "$work/kc" 2>&1; then
+      say "kubeconfig: wrote $kc"
+    else
+      problems+=("Turing Pi kubeconfig not fetched: $(grep -m1 -E 'fatal|ERROR|error' "$work/kc")")
+    fi
+  fi
+fi
 
 finish
 }
