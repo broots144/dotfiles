@@ -1,4 +1,5 @@
 # Taps
+tap "knative/client"
 tap "broots144/tap"
 
 # CLI tools
