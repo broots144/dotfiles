@@ -95,6 +95,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "android-platform-tools"
 cask "tor-browser"
 cask "rsyncui"
 cask "qfinder-pro"
