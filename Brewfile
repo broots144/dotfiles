@@ -4,6 +4,7 @@ tap "knative/client"
 tap "broots144/tap"
 
 # CLI tools
+brew "mosh"
 brew "scrcpy"
 brew "knative-extensions/kn-plugins/func"
 brew "knative/client/kn"
