@@ -97,6 +97,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "kde-connect"
 cask "android-platform-tools"
 cask "tor-browser"
 cask "rsyncui"
