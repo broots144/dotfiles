@@ -97,6 +97,8 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "deskreen"
+cask "localsend"
 cask "kde-connect"
 cask "android-platform-tools"
 cask "tor-browser"
