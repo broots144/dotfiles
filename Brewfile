@@ -97,6 +97,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "discord"
 cask "deskreen"
 cask "localsend"
 cask "kde-connect"
