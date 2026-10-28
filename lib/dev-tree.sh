@@ -61,8 +61,8 @@ dev_tree_repos() {
 }
 
 # dev_tree_private_files <src/> <workdir>: NUL-separated paths of what git does not carry:
-# the named + gitignored set from dev_tree_lists minus every tracked file (directories in the
-# named set expand to their files). Needs dev_tree_lists output in <workdir>. Used by the
+# the named + gitignored set from dev_tree_lists minus every file tracked in the checkout or on
+# an origin branch (directories in the named set expand to their files). Needs dev_tree_lists output in <workdir>. Used by the
 # MacBook sync in both directions (bin/dev-sync-from-n0 --manifest on n0, bin/dev-push-to-n0
 # on the laptop), so the two directions carry the same set.
 dev_tree_private_files() {
@@ -76,9 +76,17 @@ dev_tree_private_files() {
   (cd "$src" && cat "$work/named" "$work/ignored" | sort -zu | while IFS= read -r -d '' p; do
     if [[ -d "$p" && ! -L "$p" ]]; then find "$p" -name .git -prune -o -type f -print; else printf '%s\n' "$p"; fi
   done) | grep -vE "$skip" | sort -u > "$work/all"
+  # Tracked means tracked here or on any origin branch: a file committed on a feature branch
+  # (or already merged on GitHub) is git's to carry, and a copy rsynced ahead of the merge
+  # lands untracked on the other machine.
+  local ref
   while IFS= read -r -d '' g; do
     r="${g%/.git}"
-    "${DEV_TREE_GIT[@]}" -C "$src$r" ls-files 2>/dev/null | sed "s|^|$r/|"
+    {
+      "${DEV_TREE_GIT[@]}" -C "$src$r" ls-files 2>/dev/null
+      "${DEV_TREE_GIT[@]}" -C "$src$r" for-each-ref --format='%(refname)' refs/remotes/origin 2>/dev/null | grep -v '/HEAD$' |
+        while IFS= read -r ref; do "${DEV_TREE_GIT[@]}" -C "$src$r" ls-tree -r --name-only "$ref" 2>/dev/null; done
+    } | sed "s|^|$r/|"
   done < "$work/repos" | sort -u > "$work/tracked"
   if [[ -s "$work/tracked" ]]; then grep -vxF -f "$work/tracked" "$work/all"; else cat "$work/all"; fi | tr '\n' '\0'
 }

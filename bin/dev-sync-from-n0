@@ -10,7 +10,8 @@
 #     rewritten) or from n0 when it has no origin, and then bin/dev-pull fast-forwards every
 #     clean checkout from origin. n0 is the fallback: a repo with no origin, or whose origin
 #     fetch failed (GitHub down, hotel network), is fast-forwarded from `n0/<branch>` instead.
-#     A dirty or diverged checkout is fetched only and reported; nothing here is ever reset.
+#     A checkout with edits, or diverged, is fetched only and reported; nothing here is ever
+#     reset. One that has not been able to fast-forward for a day fails the run (dev-pull "stuck").
 #     Work done on the laptop goes back the way git does it: commit, push, and n0's own
 #     dev-pull picks it up within 20 minutes.
 #   - private files: what git does not hold (OpenTofu state, tfvars, .env, keys, gitignored
@@ -178,6 +179,9 @@ pull_args=(-q); (( dry )) && pull_args+=(-n)
 "${ZSH:-$HOME/.dotfiles}/bin/dev-pull" "${pull_args[@]}" > "$work/pull.out" 2>&1
 pull_summary=$(grep -o 'dev-pull: .*' "$work/pull.out" | tail -1)
 [[ -n "$pull_summary" ]] || { pull_summary="dev-pull: no summary"; status=3; }
+# A checkout that has been unable to fast-forward for a day fails the run (Kuma macbook-sync
+# down, a warning): book's sublevel sat 85 commits behind for four days with every run green.
+[[ "$pull_summary" =~ \ ([1-9][0-9]*)\ stuck ]] && status=3
 while IFS= read -r line; do problems+=("${line#  }"); done < <(grep '^  ' "$work/pull.out" || true)
 
 # A repo without origin, or whose origin fetch failed, follows n0 instead.
@@ -199,6 +203,8 @@ while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
   if (( dry )); then say "would fast-forward $r from n0 ($n commits)"; repos_n0ff=$((repos_n0ff + 1)); continue; fi
   if "${g[@]}" merge -q --ff-only "n0/$b" 2>>"$work/err"; then
     say "fast-forwarded $r from n0 ($n commits)"; repos_n0ff=$((repos_n0ff + 1))
+  elif grep -q 'untracked working tree files would be overwritten' "$work/err"; then
+    problems+=("untracked files block fast-forward from n0/$b: $r")
   else
     problems+=("diverged from n0/$b, fetch only: $r")
   fi

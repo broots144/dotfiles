@@ -11,7 +11,10 @@
 #   - fetch origin fails:                   reported (failed), exit 3 at the end
 #   - detached HEAD, branch missing on origin, or diverged: fetched, reported, never reset
 #   - clean and origin/<branch> is ahead:   fast-forwarded
-#   - dirty (edits, or new files not yet added): fetched, reported, and the working tree is
+#   - only new (untracked) files, and behind: fast-forwarded anyway; an untracked file the
+#     incoming commits add with identical content is removed first, one that differs makes git
+#     refuse, and the checkout is reported. The new files that stay are snapshotted as below.
+#   - dirty (edits to tracked files, or new files with nothing to pull): fetched, reported, and the working tree is
 #     snapshotted to `refs/wip/<this host>` on origin (own GitHub repos only), so uncommitted
 #     work, new files included, exists off this machine within 20 minutes and the other admin
 #     machine sees it (`git fetch origin` brings refs/wip/*; `git diff HEAD wip/n0`,
@@ -25,7 +28,9 @@
 # dev-pull [-n] [-q]    -n: fetch and report only, no merge, no snapshot.  -q: summary line only.
 # Writes ~/.local/state/dev-pull/results (one "<repo>\t<status>" line per repo; status is one
 # of ff, current, dirty, detached, diverged, no-branch, no-origin, failed) and last.json;
-# prints "dev-pull: N ff, M current, ..." last. Exit 3 if any fetch failed, else 0.
+# prints "dev-pull: N ff, M current, ..., K stuck" last. Stuck: behind origin and unable to
+# fast-forward for DEV_PULL_STUCK_HOURS (24) or more. Exit 3 if any fetch failed, else 5 if any
+# checkout is stuck, else 0.
 
 set -uo pipefail
 
@@ -86,11 +91,37 @@ wip_clear() {  # <repo>: the checkout is clean again; the snapshot ref says othe
 }
 # Make the other host's snapshots fetchable (`git fetch origin` brings refs/wip/*).
 wip_fetchspec() { local g=("${git_q[@]}" -C "$1"); "${g[@]}" config --get-all remote.origin.fetch | grep -qx '+refs/wip/\*:refs/wip/\*' || "${g[@]}" config --add remote.origin.fetch '+refs/wip/*:refs/wip/*'; }
+# Untracked files that the incoming commits add with the same content are copies of what git is
+# about to write (a private file rsynced from n0 before n0 committed it): drop them so the
+# fast-forward goes through. A file that differs is left alone, and git refuses the merge.
+drop_identical() {  # <repo> <branch>
+  local r="$1" b="$2" dst="$dev/$1" p
+  local g=("${git_q[@]}" -C "$dst")
+  while IFS= read -r -d '' p; do
+    [[ -f "$dst/$p" && ! -L "$dst/$p" ]] || continue
+    "${g[@]}" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue
+    [[ "$("${g[@]}" hash-object -- "$dst/$p")" == "$("${g[@]}" rev-parse -q --verify "origin/$b:$p")" ]] || continue
+    rm -f -- "$dst/$p" && { (( quiet )) || say "removed untracked $r/$p: identical to origin/$b"; }
+  done < <("${g[@]}" diff -z --name-only --diff-filter=A HEAD "origin/$b" 2>/dev/null)
+}
+# A checkout behind origin that cannot fast-forward (edits, new files that differ, diverged) is
+# reported every run; after DEV_PULL_STUCK_HOURS (default 24) it also counts as stuck, which
+# the summary carries and bin/dev-sync-from-n0 turns into a failed run (Kuma macbook-sync down).
+stuck_hours="${DEV_PULL_STUCK_HOURS:-24}"
+mkdir -p "$state/stuck"
+stuck_check() {  # <repo> <branch>
+  local r="$1" b="$2" rec="$state/stuck/${1//\//__}" since age
+  [[ -s "$rec" ]] || { (( dry )) && return 0; date +%s > "$rec"; }
+  since=$(cat "$rec"); age=$(( ($(date +%s) - since) / 3600 ))
+  (( age >= stuck_hours )) || return 0
+  n_stuck=$((n_stuck + 1)); problems+=("STUCK ${age}h behind origin/$b: $r")
+}
+stuck_clear() { (( dry )) || rm -f "$state/stuck/${1//\//__}"; return 0; }
 dev_tree_repos "$dev/" "$work/repos"
 tr '\0' '\n' < "$work/repos" | sed 's|/\.git$||' | sort > "$work/paths"
 is_nested() { local p="$1" q; while IFS= read -r q; do [[ "$p" == "$q"/* ]] && return 0; done < "$work/paths"; return 1; }
 
-n_ff=0 n_cur=0 n_dirty=0 n_div=0 n_noorig=0 n_fail=0
+n_ff=0 n_cur=0 n_dirty=0 n_div=0 n_noorig=0 n_fail=0 n_stuck=0
 : > "$state/results.new"
 problems=()
 note() { printf '%s\t%s\n' "$1" "$2" >> "$state/results.new"; }
@@ -108,34 +139,52 @@ while IFS= read -r r; do
   fi
   b=$("${g[@]}" symbolic-ref --short -q HEAD || true)
   if [[ -z "$b" ]]; then note "$r" detached; n_dirty=$((n_dirty + 1)); problems+=("detached HEAD, fetch only: $r"); continue; fi
-  if [[ -n "$("${g[@]}" status --porcelain 2>/dev/null)" ]]; then
+  on_origin=0; "${g[@]}" rev-parse -q --verify "refs/remotes/origin/$b" >/dev/null && on_origin=1
+  behind=0; (( on_origin )) && behind=$("${g[@]}" rev-list --count "HEAD..origin/$b" 2>/dev/null || echo 0)
+  edits=$("${g[@]}" status --porcelain --untracked-files=no 2>/dev/null)
+  new=$("${g[@]}" ls-files --others --exclude-standard 2>/dev/null | head -1)
+  # Edits to tracked files: fetch only. New files alone do not hold a fast-forward back (git
+  # refuses by itself when one would be overwritten); they were what kept book's sublevel 85
+  # commits behind for four days (a SOPS file rsynced from n0 before n0 committed it).
+  if [[ -n "$edits" || ( -n "$new" && ! ( $on_origin == 1 && $behind != 0 ) ) ]]; then
     note "$r" dirty; n_dirty=$((n_dirty + 1))
     if (( dry )); then problems+=("dirty, fetch only (would snapshot): $r")
-    elif own_repo "$dev/$r" && [[ -n "$b" ]]; then wip_snapshot "$r" "$b"; problems+=("dirty, fetch only; $wip_msg")
+    elif own_repo "$dev/$r"; then wip_snapshot "$r" "$b"; problems+=("dirty, fetch only; $wip_msg")
     else problems+=("dirty, fetch only: $r"); fi
+    if (( behind == 0 )); then stuck_clear "$r"; else stuck_check "$r" "$b"; fi
     continue
   fi
-  (( dry )) || wip_clear "$r"
-  if ! "${g[@]}" rev-parse -q --verify "refs/remotes/origin/$b" >/dev/null; then
+  [[ -z "$new" ]] && (( ! dry )) && wip_clear "$r"
+  if (( ! on_origin )); then
     note "$r" no-branch; n_dirty=$((n_dirty + 1)); problems+=("branch $b not on origin, fetch only: $r"); continue
   fi
-  behind=$("${g[@]}" rev-list --count "HEAD..origin/$b" 2>/dev/null || echo 0)
-  if [[ "$behind" == "0" ]]; then note "$r" current; n_cur=$((n_cur + 1)); continue; fi
+  if [[ "$behind" == "0" ]]; then stuck_clear "$r"; note "$r" current; n_cur=$((n_cur + 1)); continue; fi
   if (( dry )); then
-    (( quiet )) || say "would fast-forward $r ($behind commits)"
+    (( quiet )) || say "would fast-forward $r ($behind commits${new:+, new files kept})"
     note "$r" ff; n_ff=$((n_ff + 1)); continue
   fi
+  [[ -n "$new" ]] && drop_identical "$r" "$b"
   if "${g[@]}" merge -q --ff-only "origin/$b" 2>"$work/err"; then
     (( quiet )) || say "fast-forwarded $r ($behind commits) -> $("${g[@]}" log --oneline -1)"
-    note "$r" ff; n_ff=$((n_ff + 1))
+    note "$r" ff; n_ff=$((n_ff + 1)); stuck_clear "$r"
+    if [[ -n "$new" ]]; then
+      if [[ -z "$("${g[@]}" status --porcelain 2>/dev/null)" ]]; then wip_clear "$r"
+      elif own_repo "$dev/$r"; then wip_snapshot "$r" "$b"; problems+=("new files kept; $wip_msg")
+      else problems+=("new files kept: $r"); fi
+    fi
+  elif grep -q 'untracked working tree files would be overwritten' "$work/err"; then
+    note "$r" dirty; n_dirty=$((n_dirty + 1))
+    problems+=("untracked files differ from origin/$b, fetch only: $r ($(awk '/^\t/{sub(/^\t/,""); printf "%s%s", s, $0; s=", "}' "$work/err"))")
+    stuck_check "$r" "$b"
   else
     note "$r" diverged; n_div=$((n_div + 1)); problems+=("diverged from origin/$b, fetch only: $r")
+    stuck_check "$r" "$b"
   fi
 done < "$work/paths"
 
 mv "$state/results.new" "$state/results"
-status=0; (( n_fail == 0 )) || status=3
-summary="dev-pull: $n_ff ff, $n_cur current, $n_dirty dirty, $n_div diverged, $n_noorig no-origin, $n_fail failed"
+status=0; (( n_stuck == 0 )) || status=5; (( n_fail == 0 )) || status=3
+summary="dev-pull: $n_ff ff, $n_cur current, $n_dirty dirty, $n_div diverged, $n_noorig no-origin, $n_fail failed, $n_stuck stuck"
 printf '{"finished_at":"%s","exit":%d,"summary":"%s"}\n' "$(date -u +%FT%TZ)" "$status" "$summary" > "$state/last.json"
 say "$summary"
 (( ${#problems[@]} == 0 )) || printf '  %s\n' "${problems[@]}"
