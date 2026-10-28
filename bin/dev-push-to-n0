@@ -24,7 +24,7 @@ SYNC_SKIP=(nightshift)   # keep in step with dev-sync-from-n0
 sync_skipped() { local r="$1" s; for s in "${SYNC_SKIP[@]}"; do [[ "$r" == "$s" || "$r" == "$s"/* ]] && return 0; done; return 1; }
 
 dry=0; [[ "${1:-}" == "-n" ]] && dry=1
-me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
 [[ "$me" != "n0" ]] || { echo "this is n0" >&2; exit 2; }
 ssh -o BatchMode=yes -o ConnectTimeout=10 n0 true 2>/dev/null || { echo "n0 unreachable" >&2; exit 1; }
 

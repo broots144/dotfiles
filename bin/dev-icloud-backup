@@ -31,7 +31,7 @@ set -euo pipefail
 
 src="$HOME/dev/"
 icloud="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
-root="$icloud/Backups/$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+root="$icloud/Backups/$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)"
 dst="$root/dev/"
 
 if [[ ! -d "$icloud" ]]; then

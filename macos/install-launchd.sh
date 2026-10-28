@@ -6,8 +6,9 @@
 # launchd does not expand ~), drops it into ~/Library/LaunchAgents, and
 # (re)bootstraps it into the current GUI session. Idempotent — safe to re-run.
 #
-# A plist that carries `<!-- dotfiles-hosts: a b -->` is installed only on those LocalHostNames
-# (and unloaded/removed elsewhere); one without the marker is installed everywhere. The iCloud
+# A plist that carries `<!-- dotfiles-hosts: a b -->` is installed only on those hosts
+# (and unloaded/removed elsewhere). The host is HostName, else LocalHostName: Bonjour renames
+# LocalHostName on a name conflict (n0 became n0-2 on 2026-10-28), HostName stays put; one without the marker is installed everywhere. The iCloud
 # backup and the Brewfile reconciler belong to n0; the dev sync to the laptop.
 
 set -euo pipefail
@@ -17,7 +18,7 @@ agents_dir="$HOME/Library/LaunchAgents"
 uid="$(id -u)"
 
 mkdir -p "$agents_dir" "$HOME/Library/Logs"
-me="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+me="$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)"
 
 shopt -s nullglob
 for src in "$here"/com.broots.*.plist; do

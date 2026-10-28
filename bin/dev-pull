@@ -48,7 +48,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
 git_q=("${DEV_TREE_GIT[@]}" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30)
 
-me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
 mkdir -p "$state/wip"
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 

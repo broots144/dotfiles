@@ -87,7 +87,7 @@ esac
 # pulls the dotfiles repo, which may replace this very file on disk while it executes.
 main() {
 dry=0; [[ "${1:-}" == "-n" ]] && dry=1
-me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
 if [[ "$me" == "n0" ]]; then
   say "this is n0; the sync runs on the laptop (macos/install-launchd.sh scopes the agent)" >&2
   exit 2
