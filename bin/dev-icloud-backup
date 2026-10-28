@@ -127,7 +127,7 @@ else
 fi
 
 # --delete-excluded also removes .git directories and secret files an older run mirrored.
-/usr/bin/rsync -a --delete --delete-excluded "${dry[@]}" "${args[@]}" \
+/usr/bin/rsync -a --delete --delete-excluded ${dry[@]+"${dry[@]}"} "${args[@]}" \
   --from0 --exclude-from="$work/rules" "$src" "$dst" || { s=$?; [[ $status -eq 0 ]] && status=$s; }
 
 finish
