@@ -37,6 +37,13 @@ ok grep -q 'untracked files differ from origin/main, fetch only: diff (secrets/x
 ok [ "$(git -C "$HOME/dev/edits" rev-list --count HEAD..origin/main)" = 1 ]
 ok grep -q 'STUCK 0h behind origin/main: edits' <<<"$out"
 
+# A dry run calls a diverged checkout diverged, not a fast-forward.
+git -C "$HOME/dev/edits" stash -q
+git -C "$HOME/dev/edits" commit -q --allow-empty -m local
+out=$("$here/bin/dev-pull" -n 2>&1)
+ok grep -q 'diverged from origin/main, fetch only: edits' <<<"$out"
+git -C "$HOME/dev/edits" reset -q --hard HEAD^; git -C "$HOME/dev/edits" stash pop -q
+
 # Under the threshold: reported, not stuck. Clearing the blocker clears the record.
 out=$("$here/bin/dev-pull" 2>&1) && rc=0 || rc=$?
 ok [ "$rc" = 0 ]; ok grep -q ', 0 stuck' <<<"$out"
