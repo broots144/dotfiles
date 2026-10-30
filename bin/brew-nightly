@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# brew-nightly — Homebrew to latest on the MacBook (sublevel ADR-088; n0 has its own job,
+# sublevel role brew_nightly_mac). Formulae, then the non-greedy casks: apps that update
+# themselves are left to their own updater. A cask that needs a password (.pkg) is listed, not
+# fatal. macOS itself stays manual.
+#
+# Run by macos/com.broots.brew-nightly.plist at 23:45; asleep or away then, launchd runs it on
+# the next wake. A failure fires On Fire `upgrade:brew-book` (warning) through sublevel's
+# scripts/onfire-notify.sh (reachable off-LAN over NetBird); the next good run resolves it.
+# Exit: 0 ok, 1 brew failed or formulae still outdated, 2 wrong host.
+
+set -uo pipefail
+export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin
+export HOMEBREW_NO_ENV_HINTS=1
+export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
+sublevel="${SUBLEVEL_DIR:-$HOME/dev/workshop144/sublevel}"
+say() { echo "$(date -u +%FT%TZ) brew-nightly: $*"; }
+
+me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
+if [[ "$me" == n0 ]]; then
+  say "this is n0; its upgrade is sublevel's brew_nightly_mac" >&2
+  exit 2
+fi
+
+run() {
+  brew update --quiet || return 1
+  say "outdated before: $(brew outdated --quiet | tr '\n' ' ')"
+  brew upgrade --formula || return 1
+  if ! brew upgrade --cask </dev/null; then
+    say "casks not upgraded unattended (password or GUI needed): $(brew outdated --cask --quiet | tr '\n' ' ')" >&2
+  fi
+  brew cleanup --prune=30 --quiet
+  local left
+  left=$(comm -23 <(brew outdated --formula --quiet | sort) <(brew list --pinned | sort) | tr '\n' ' ')
+  [[ -z "$left" ]] || { say "formulae still outdated: $left" >&2; return 1; }
+}
+
+say "start"
+run; rc=$?
+say "exit $rc"
+if [[ -x "$sublevel/scripts/onfire-notify.sh" ]]; then
+  if (( rc == 0 )); then
+    "$sublevel/scripts/onfire-notify.sh" upgrade:brew-book resolved warning "brew upgrade on the MacBook failed"
+  else
+    "$sublevel/scripts/onfire-notify.sh" upgrade:brew-book firing warning "brew upgrade on the MacBook failed" \
+      "exit $rc; see ~/Library/Logs/brew-nightly.log on the MacBook"
+  fi
+fi
+exit "$rc"

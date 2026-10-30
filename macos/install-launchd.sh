@@ -10,7 +10,7 @@
 # (and unloaded/removed elsewhere). The host is HostName, else LocalHostName: Bonjour renames
 # LocalHostName on a name conflict (n0 became n0-2 on 2026-10-28), HostName stays put.
 # A plist without the marker is installed everywhere. The iCloud backup and the Brewfile
-# reconciler belong to n0; the dev sync to the laptop.
+# reconciler belong to n0; the dev sync and the nightly brew upgrade to the laptop.
 
 set -euo pipefail
 

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent (MacBook only): Homebrew to latest nightly at 23:45 local; asleep or away then,
+  launchd runs it on the next wake. See bin/brew-nightly. n0's own nightly upgrade is sublevel's
+  role brew_nightly_mac (ADR-088).
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<!-- dotfiles-hosts: book -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.brew-nightly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.dotfiles/bin/brew-nightly</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>23</integer>
+        <key>Minute</key>
+        <integer>45</integer>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/brew-nightly.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/brew-nightly.log</string>
+</dict>
+</plist>
