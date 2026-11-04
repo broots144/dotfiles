@@ -58,7 +58,8 @@ export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt"
 # (n0 has no such file: the inventory defaults are n0's keys).
 [[ -f "$HOME/.ssh/book" ]] && export SUBLEVEL_ADMIN_KEY="$HOME/.ssh/book"
 
-# --- sublevel: K3s sandbox kubeconfig (ADR-032) ---
-# kubectl targets the n4 K3s learning cluster by default. To also use other
-# clusters, append them: KUBECONFIG="$HOME/.kube/config:$HOME/.kube/sublevel-k3s.yaml"
-export KUBECONFIG="$HOME/.kube/sublevel-k3s.yaml"
+# --- sublevel: K3s kubeconfig (ADR-075) ---
+# kubectl targets the Turing Pi 2 K3s cluster (tp1-tp4); sublevel's `just turingpi --tags
+# kubeconfig` writes the file. The n4 K3s VM (ADR-032, sublevel-k3s.yaml) was retired
+# 2026-10-19. To add other clusters: KUBECONFIG="$HOME/.kube/turingpi.yaml:$HOME/.kube/other.yaml"
+export KUBECONFIG="$HOME/.kube/turingpi.yaml"
