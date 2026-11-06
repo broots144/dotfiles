@@ -76,5 +76,12 @@ snap=$(git -C "$t/up/wipt" ls-tree -r --name-only "${wref:-HEAD}")
 ok grep -qx notes.txt <<<"$snap"
 ok bash -c '! grep -q "^secrets/plain.yaml$\|^credentials/" <<<"$1"' _ "$snap"
 
+# No gitleaks: the snapshot is withheld, not pushed unscanned.
+git -C "$t/up/wipt" update-ref -d "${wref:-refs/wip/none}" 2>/dev/null || true
+rm -f "$HOME/.local/state/dev-pull/wip/wipt"; printf 'n2\n' >> "$HOME/dev/wipt/notes.txt"
+out=$(DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS=no-such-gitleaks "$here/bin/dev-pull" 2>&1 || true)
+ok grep -q 'snapshot withheld, gitleaks not installed: wipt' <<<"$out"
+ok [ -z "$(git -C "$t/up/wipt" for-each-ref 'refs/wip/*')" ]
+
 (( fail == 0 )) && echo "dev-pull: ok"
 exit "$fail"

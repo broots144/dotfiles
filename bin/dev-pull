@@ -22,7 +22,8 @@
 #     force-updated when the tree changes, deleted when the checkout is clean again. Left out of
 #     it: ignored files (git's own rule), files with a secret-bearing name (lib/dev-tree.sh,
 #     rsync carries those), untracked files over 1 MiB, and anything gitleaks flags (then the
-#     snapshot is withheld and reported). Never the working tree, index, branches or stash.
+#     snapshot is withheld and reported; it is also withheld when gitleaks is not installed).
+#     Never the working tree, index, branches or stash.
 # Nothing here ever resets, rebases, stashes, or touches a branch.
 #
 # dev-pull [-n] [-q]    -n: fetch and report only, no merge, no snapshot.  -q: summary line only.
@@ -81,7 +82,9 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
   n_new=$("${g[@]}" ls-files --others --exclude-standard | wc -l | tr -d ' ')
   commit=$(printf 'wip(%s): %s, %s modified, %s new, %s\n\nSnapshot by dev-pull; not a branch. Secret-named and >1 MiB files left out.\n' \
     "$me" "$b" "$n_mod" "$n_new" "$(date -u +%FT%TZ)" | "${g[@]}" commit-tree "$tree" -p HEAD) || { wip_msg="snapshot failed (commit-tree): $r"; return 1; }
-  if command -v "$gitleaks" >/dev/null && ! "$gitleaks" git --no-banner --exit-code 1 --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
+  # Fail closed: no scanner (fresh laptop, broken upgrade, odd PATH) means no push.
+  command -v "$gitleaks" >/dev/null || { wip_msg="snapshot withheld, gitleaks not installed: $r"; return 1; }
+  if ! "$gitleaks" git --no-banner --exit-code 1 --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
     wip_msg="snapshot withheld, gitleaks finding: $r (gitleaks git --log-opts='$commit^!' $dst)"; return 1
   fi
   if "${g[@]}" push -q --force origin "$commit:$wip_ref" 2>"$work/err"; then
