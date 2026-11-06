@@ -89,7 +89,9 @@ while test $# -gt 0; do
 			displayUsageAndExit
 			;;
 		"-e"|"--edit")
-			exec "$EDITOR" "$dotfilesDirectory"
+			# $EDITOR may carry flags (`subl -w`): let it word-split.
+			# shellcheck disable=SC2086
+			exec $EDITOR "$dotfilesDirectory"
 			exit
 			;;
 		"-s"|"--sync")

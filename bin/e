@@ -13,4 +13,6 @@
 #   $ e .
 #   $ e /usr/local
 #   # => opens the specified directory in your editor
-exec "$EDITOR" "${1:-.}"
+# $EDITOR may carry flags (system/env.zsh sets `subl -w`), so it is left to word-split.
+# shellcheck disable=SC2086
+exec $EDITOR "${1:-.}"
