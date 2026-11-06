@@ -1,5 +1,5 @@
 # Maintained shell scripts (bash/sh). Legacy holman scripts are syntax-checked only.
-maintained := "bin/brew-nightly bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state test/brew-sync-push.sh test/dev-icloud-backup.sh test/dev-pull.sh test/dev-sync-lock.sh test/untrusted-input.sh"
+maintained := "bin/brew-nightly bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
 
 default: check
 
@@ -11,7 +11,7 @@ syntax:
     #!/usr/bin/env bash
     set -euo pipefail
     for f in */*.zsh zsh/*.symlink functions/* bin/brew-reconcile; do zsh -n "$f"; done
-    for f in bin/* lib/* script/* test/* macos/*.sh; do
+    for f in bin/* lib/* script/* test/*.sh test/lib/* macos/*.sh; do
       [[ -L "$f" ]] && continue
       case "$(head -1 "$f")" in *bash*) bash -n "$f" ;; */sh*) sh -n "$f" ;; esac
     done
@@ -29,6 +29,10 @@ plists:
 
 test:
     script/test
+
+# approximate line coverage of the maintained bash scripts (bash >= 4.1)
+coverage:
+    script/coverage
 
 # P0 topic layout: every zsh topic file parses
 verify-phase-0: syntax

@@ -20,13 +20,14 @@ set -uo pipefail
 dev="$HOME/dev"
 export PATH="/opt/homebrew/bin:$PATH"
 . "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
+ssh_bin="${DEV_SYNC_SSH:-ssh}"   # as in dev-sync-from-n0 (the tests' fake-n0 stub)
 SYNC_SKIP=(nightshift)   # keep in step with dev-sync-from-n0
 sync_skipped() { local r="$1" s; for s in "${SYNC_SKIP[@]}"; do [[ "$r" == "$s" || "$r" == "$s"/* ]] && return 0; done; return 1; }
 
 dry=0; [[ "${1:-}" == "-n" ]] && dry=1
 me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
 [[ "$me" != "n0" ]] || { echo "this is n0" >&2; exit 2; }
-ssh -o BatchMode=yes -o ConnectTimeout=10 n0 true 2>/dev/null || { echo "n0 unreachable" >&2; exit 1; }
+"$ssh_bin" -o BatchMode=yes -o ConnectTimeout=10 n0 true 2>/dev/null || { echo "n0 unreachable" >&2; exit 1; }
 
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 dev_tree_lists "$dev/" "$work"
@@ -35,7 +36,7 @@ dev_tree_private_files "$dev/" "$work" | while IFS= read -r -d '' p; do
 done > "$work/list"
 n=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
 
-rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "ssh -o BatchMode=yes -o ConnectTimeout=10")
+rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "$ssh_bin -o BatchMode=yes -o ConnectTimeout=10")
 # Without --update: everything that differs. With --update: only what is newer here.
 # A failed comparison must not read as "nothing newer here": rsync's status is checked on its own.
 # 23/24 (a listed file vanished or could not be read since the manifest was made) are partial

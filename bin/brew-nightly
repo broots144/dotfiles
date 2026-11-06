@@ -11,7 +11,8 @@
 # Exit: 0 ok, 1 brew failed or formulae still outdated, 2 wrong host.
 
 set -uo pipefail
-export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin
+# BREW_NIGHTLY_PATH exists for test/brew-nightly.sh (stub brew and scutil).
+export PATH="${BREW_NIGHTLY_PATH:-/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin}"
 export HOMEBREW_NO_ENV_HINTS=1
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
 sublevel="${SUBLEVEL_DIR:-$HOME/dev/workshop144/sublevel}"
