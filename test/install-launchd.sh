@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # macos/install-launchd.sh renders each plist (__HOME__ -> $HOME) into ~/Library/LaunchAgents
 # and reloads it; a `dotfiles-hosts` marker limits a plist to the hosts it names, matched as
-# whole names (n0 is not n0-2), on HostName, else LocalHostName; a plist for other hosts is
-# booted out and removed. The script runs from a copy beside synthetic plists; scutil and
+# whole names (n0 is not n0-2; spaces, tabs or commas separate them), on HostName, else
+# LocalHostName; a plist for other hosts is booted out and removed. The script runs from a copy beside synthetic plists; scutil and
 # launchctl are stubs.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,7 +26,7 @@ plist() {  # <label> [hosts]
     echo "<plist version=\"1.0\"><dict><key>Label</key><string>com.broots.$1</string>"
     echo "<key>StandardOutPath</key><string>__HOME__/Library/Logs/$1.log</string></dict></plist>"; } > "$t/macos/com.broots.$1.plist"
 }
-plist mini n0; plist laptop book; plist everywhere; plist both 'n0 book'; plist renamed n0-2
+plist mini n0; plist laptop book; plist everywhere; plist both 'n0 book'; plist renamed n0-2; plist comma 'n0,book'
 fail=0
 ok() { "$@" || { echo "FAIL: line ${BASH_LINENO[0]}: $*"; fail=1; }; }
 la="$HOME/Library/LaunchAgents"; uid=$(id -u)
@@ -34,7 +34,7 @@ run() { : > "$LOG"; out=$(env "$@" "$t/macos/install-launchd.sh" 2>&1) && rc=0 |
 
 run FAKE_HOSTNAME=n0
 ok [ "$rc" = 0 ]
-for l in mini everywhere both; do
+for l in mini everywhere both comma; do
   ok grep -qx "loaded com.broots.$l" <<<"$out"; ok [ -f "$la/com.broots.$l.plist" ]
   ok grep -qx "launchctl bootstrap gui/$uid $la/com.broots.$l.plist" "$LOG"
   ok grep -qx "launchctl enable gui/$uid/com.broots.$l" "$LOG"
@@ -51,6 +51,7 @@ cp "$la/com.broots.mini.plist" "$la/com.broots.laptop.plist"
 run FAKE_HOSTNAME= FAKE_LOCAL=book
 ok [ "$rc" = 0 ]
 ok grep -qx 'loaded com.broots.laptop' <<<"$out"; ok grep -qx 'loaded com.broots.both' <<<"$out"
+ok grep -qx 'loaded com.broots.comma' <<<"$out"
 ok grep -qx 'removed com.broots.mini (hosts: n0; this is book)' <<<"$out"
 ok grep -qx "launchctl bootout gui/$uid/com.broots.mini" "$LOG"
 ok [ ! -e "$la/com.broots.mini.plist" ]

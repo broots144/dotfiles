@@ -6,9 +6,14 @@
 #           rsync and git over ssh reach a fake n0 tree); any other host (github.com) is
 #           unreachable. FAKE_N0_DOWN=1: n0 is unreachable too. FAKE_N0_RSYNC_FAIL=1: n0 answers,
 #           but a remote rsync fails (exit 12, a protocol error).
+# The scripts put /opt/homebrew/bin ahead of PATH, so a Homebrew ssh would shadow the stub and
+# reach the real n0: fake_n0_stubs exports DEV_SYNC_SSH=<dir>/ssh, which the scripts use for
+# every ssh (ssh_n0, rsync -e, GIT_SSH_COMMAND). <dir> must not contain spaces.
 fake_n0_stubs() {
   local d="$1"
+  case "$d" in *" "*) echo "fake_n0_stubs: no spaces in $d" >&2; exit 1 ;; esac
   mkdir -p "$d"
+  export DEV_SYNC_SSH="$d/ssh"
   printf '#!/bin/sh\necho "${FAKE_HOST:-book}"\n' > "$d/scutil"
   cat > "$d/ssh" <<'SSH'
 #!/bin/sh

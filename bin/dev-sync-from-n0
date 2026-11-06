@@ -51,8 +51,11 @@ SYNC_SKIP=(nightshift)
 sync_skipped() { local r="$1" s; for s in "${SYNC_SKIP[@]}"; do [[ "$r" == "$s" || "$r" == "$s"/* ]] && return 0; done; return 1; }
 
 say() { echo "$(date -u +%FT%TZ) $*"; }
-ssh_n0=(ssh -o BatchMode=yes -o ConnectTimeout=10 n0)
-export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# DEV_SYNC_SSH: the ssh client (the tests point it at their fake-n0 stub, which a Homebrew ssh
+# ahead in PATH would otherwise shadow). No spaces in the path: it goes into rsync -e and git.
+ssh_bin="${DEV_SYNC_SSH:-ssh}"
+ssh_n0=("$ssh_bin" -o BatchMode=yes -o ConnectTimeout=10 n0)
+export GIT_SSH_COMMAND="$ssh_bin -o BatchMode=yes -o ConnectTimeout=10"
 export GIT_TERMINAL_PROMPT=0
 
 # --- modes that run on n0 -------------------------------------------------------------------
@@ -243,7 +246,7 @@ while IFS= read -r -d '' p; do
 done < "$work/manifest" > "$work/list"
 n_list=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
 
-rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "ssh -o BatchMode=yes -o ConnectTimeout=10")
+rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "$ssh_bin -o BatchMode=yes -o ConnectTimeout=10")
 # Dry run without --update lists every file n0 has changed; the real run with --update skips
 # the ones newer here. The difference is what diverged on this side (dev-push-to-n0 carries it back).
 /usr/bin/rsync -n "${rs[@]:1}" n0:dev/ "$dev/" > "$work/would" 2>>"$work/err" || true

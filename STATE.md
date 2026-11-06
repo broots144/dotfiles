@@ -60,7 +60,8 @@ Last updated: 2026-11-06 by Claude (test coverage, branch tests/coverage-2026-11
   `dev-pull-edges`, `dev-push-to-n0`, `dev-sync-from-n0`, `dev-sync-lock`, `install-launchd`,
   `untrusted-input`); all pass on n0 2026-11-06 under Homebrew bash and under /bin/bash 3.2.
   The MacBook sync tests reach a fake n0 (a directory) through an ssh stub
-  (`test/lib/fake-n0.sh`); GitHub is unreachable in them; brew, mas, scutil, launchctl and
+  (`test/lib/fake-n0.sh`), passed as `DEV_SYNC_SSH` so a Homebrew ssh ahead in PATH cannot
+  shadow it and reach the real n0; GitHub is unreachable in them; brew, mas, scutil, launchctl and
   onfire-notify are stubs. `bin/brew-nightly` takes `BREW_NIGHTLY_PATH` for its test.
 - Coverage: `script/coverage` (`just coverage`, bash 4.1 or later) traces every bash process the
   suite starts and reports approximate line coverage of the maintained bash scripts: 51% before
