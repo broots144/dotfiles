@@ -45,10 +45,14 @@ dry=()
 
 start=$(date +%s)
 status=0
+# Writes into iCloud Drive can fail (EDEADLK on an evicted file, 2026-11-06), so the status
+# record goes via a temp file and never stops the exit line from being logged.
 finish() {
   if [[ ${#dry[@]} -eq 0 ]]; then
-    printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
-      "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/LAST_RUN.json"
+    { printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
+        "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/.LAST_RUN.json.tmp" \
+      && mv -f "$root/.LAST_RUN.json.tmp" "$root/LAST_RUN.json"; } \
+      || echo "$(date -u +%FT%TZ) could not write $root/LAST_RUN.json" >&2
   fi
   echo "$(date -u +%FT%TZ) dev-icloud-backup exit=$status in $(( $(date +%s) - start ))s"
   exit "$status"
@@ -74,6 +78,7 @@ args=("${DEV_TREE_RSYNC_EXCLUDES[@]}")
 git_safe=("${DEV_TREE_GIT[@]}")
 
 keys="$HOME/.config/sops/age/keys.txt"
+cache="$HOME/.local/state/dev-icloud-backup/git"
 recipient=$( { sed -n 's/^# public key: //p' "$keys" 2>/dev/null || true; } | head -1)
 age=$(command -v age || echo /opt/homebrew/bin/age)
 
@@ -103,19 +108,27 @@ else
     status=4
   fi
 
-  # Git history as encrypted bundles, rebuilt only when a repo's refs changed.
-  mkdir -p "$root/git"
+  # Git history as encrypted bundles, rebuilt only when a repo's refs changed. The refs cache
+  # lives on local disk: an evicted .refs file in iCloud Drive failed to open (EDEADLK) and
+  # ended the run. The old iCloud copy is still read once so the move rebuilds nothing.
+  mkdir -p "$root/git" "$cache"
   built=0
   while IFS= read -r -d '' g; do
     r="${g%/.git}"; name="${r//\//__}"
     refs=$("${git_safe[@]}" -C "$src$r" for-each-ref --format='%(objectname) %(refname)' 2>/dev/null || true)
     [[ -n "$refs" ]] || continue
     sum=$(printf '%s\n' "$refs" | shasum -a 256 | cut -d' ' -f1)
-    [[ -f "$root/git/$name.bundle.age" && "$(cat "$root/git/$name.refs" 2>/dev/null)" == "$sum" ]] && continue
+    refs_f="$cache/$name.refs"
+    [[ -f "$root/git/$name.bundle.age" && "$(cat "$refs_f" 2>/dev/null || cat "$root/git/$name.refs" 2>/dev/null || true)" == "$sum" ]] && continue
     if "${git_safe[@]}" -C "$src$r" bundle create -q "$work/b.bundle" --all 2>/dev/null \
         && "$age" -r "$recipient" -o "$root/git/.$name.tmp" "$work/b.bundle" \
         && mv -f "$root/git/.$name.tmp" "$root/git/$name.bundle.age"; then
-      printf '%s\n' "$sum" > "$root/git/$name.refs"
+      if printf '%s\n' "$sum" > "$refs_f.tmp" && mv -f "$refs_f.tmp" "$refs_f"; then
+        rm -f "$root/git/$name.refs" 2>/dev/null || true
+      else
+        echo "$(date -u +%FT%TZ) could not record refs for $r" >&2
+        [[ $status -eq 0 ]] && status=5
+      fi
       built=$((built + 1))
     else
       rm -f "$root/git/.$name.tmp"

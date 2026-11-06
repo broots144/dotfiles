@@ -65,5 +65,16 @@ mv "$t/keys.away" "$keys"; mv "$HOME/dev" "$t/dev.away"
 grep -q '"exit":6' "$root/LAST_RUN.json" || { echo "FAIL: missing ~/dev, LAST_RUN.json not written"; fail=1; }
 mv "$t/dev.away" "$HOME/dev"
 
+# A write into iCloud that fails (an old .refs file the provider refuses, simulated by a
+# directory in its place) must not end the run: bundles, mirror and LAST_RUN.json still done.
+rm -rf "${HOME:?}/.local/state/dev-icloud-backup"; rm -f "$root/git/app.refs"; mkdir -p "$root/git/app.refs"; touch "$root/git/app.refs/x"
+g commit -q --allow-empty -m more; echo y > "$HOME/dev/other/new.txt"
+out=$("$here/bin/dev-icloud-backup" 2>&1) && rc=0 || rc=$?
+[[ $rc == 0 ]] || { echo "FAIL: blocked .refs file in iCloud: exit $rc ($out)"; fail=1; }
+grep -q 'dev-icloud-backup exit=0' <<<"$out" || { echo "FAIL: no exit line logged"; fail=1; }
+[[ -e "$root/dev/other/new.txt" ]] || { echo "FAIL: mirror skipped after a failed iCloud write"; fail=1; }
+grep -q '"exit":0' "$root/LAST_RUN.json" || { echo "FAIL: LAST_RUN.json not updated"; fail=1; }
+[[ -s "$HOME/.local/state/dev-icloud-backup/git/app.refs" ]] || { echo "FAIL: refs cache not kept locally"; fail=1; }
+
 (( fail == 0 )) && echo "ok dev-icloud-backup"
 exit "$fail"
