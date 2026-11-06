@@ -57,7 +57,8 @@ dev_tree_repos() {
       */)  bulk+=(-o -name "${e%/}") ;;
     esac
   done
-  (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) | dev_tree_strip > "$out"
+  # find exits 1 on one unreadable or vanished entry; keep what it listed (pipefail callers).
+  { (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) || true; } | dev_tree_strip > "$out"
 }
 
 # dev_tree_private_files <src/> <workdir>: NUL-separated paths of what git does not carry:
@@ -100,7 +101,7 @@ dev_tree_private_files() {
 # Also fills DEV_TREE_RSYNC_EXCLUDES with --exclude args for .git, the bulk folders and the
 # secret names (case-insensitive).
 dev_tree_lists() {
-  local src="$1" work="$2" e g r f p q
+  local src="$1" work="$2" e g r f p q sz
   DEV_TREE_RSYNC_EXCLUDES=(--exclude .git/)
   for e in "${DEV_TREE_EXCLUDES[@]}"; do DEV_TREE_RSYNC_EXCLUDES+=(--exclude "$e"); done
   for e in "${DEV_TREE_SECRET_NAMES[@]}"; do DEV_TREE_RSYNC_EXCLUDES+=(--exclude "$(dev_tree_nocase "$e")"); done
@@ -117,7 +118,7 @@ dev_tree_lists() {
   named=( \( "${named[@]:1}" \) )
 
   # Lists are NUL-separated so any legal file name survives.
-  (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) | dev_tree_strip > "$work/named"
+  { (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) || true; } | dev_tree_strip > "$work/named"
   dev_tree_repos "$src" "$work/repos"
 
   : > "$work/ignored"; : > "$work/gitcfg"; : > "$work/rules"
@@ -128,7 +129,8 @@ dev_tree_lists() {
       [[ "$f" == */ ]] && continue
       p="$r/$f"
       [[ -f "$src$p" && ! -L "$src$p" ]] || continue
-      (( $(stat -f %z "$src$p") <= 1048576 )) || continue
+      sz=$(stat -f %z "$src$p" 2>/dev/null) || continue
+      (( sz <= 1048576 )) || continue
       printf '%s\0' "$p" >> "$work/ignored"
       q="${p//\*/\\*}"; q="${q//\?/\\?}"; q="${q//\[/\\[}"
       printf -- '- /%s\0' "$q" >> "$work/rules"

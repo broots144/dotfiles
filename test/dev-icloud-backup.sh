@@ -76,5 +76,13 @@ grep -q 'dev-icloud-backup exit=0' <<<"$out" || { echo "FAIL: no exit line logge
 grep -q '"exit":0' "$root/LAST_RUN.json" || { echo "FAIL: LAST_RUN.json not updated"; fail=1; }
 [[ -s "$HOME/.local/state/dev-icloud-backup/git/app.refs" ]] || { echo "FAIL: refs cache not kept locally"; fail=1; }
 
+# One unreadable directory must not end the run before anything is archived or mirrored.
+mkdir -p "$HOME/dev/other/locked"; chmod 000 "$HOME/dev/other/locked"; echo z > "$HOME/dev/other/new2.txt"
+"$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
+chmod 755 "$HOME/dev/other/locked"
+[[ -e "$root/dev/other/new2.txt" ]] || { echo "FAIL: unreadable directory stopped the mirror (exit $rc)"; fail=1; }
+grep -q '"finished_at"' "$root/LAST_RUN.json" && [[ "$root/LAST_RUN.json" -nt "$HOME/dev/other/new2.txt" ]] \
+  || { echo "FAIL: unreadable directory, LAST_RUN.json not written"; fail=1; }
+
 (( fail == 0 )) && echo "ok dev-icloud-backup"
 exit "$fail"

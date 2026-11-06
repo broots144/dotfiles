@@ -73,7 +73,11 @@ fi
 . "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-dev_tree_lists "$src" "$work"
+if ! dev_tree_lists "$src" "$work"; then
+  echo "$(date -u +%FT%TZ) scan of $src failed; refusing to mirror or archive" >&2
+  status=6
+  finish
+fi
 args=("${DEV_TREE_RSYNC_EXCLUDES[@]}")
 git_safe=("${DEV_TREE_GIT[@]}")
 
