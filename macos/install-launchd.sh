@@ -27,7 +27,8 @@ for src in "$here"/com.broots.*.plist; do
   dst="$agents_dir/$label.plist"
 
   hosts="$(sed -n 's/.*dotfiles-hosts: *\(.*[^ ]\) *-->.*/\1/p' "$src")"
-  if [[ -n "$hosts" ]] && ! grep -qw -- "$me" <<<"$hosts"; then
+  # Whole names only: `grep -w n0` also matched a marker naming n0-2 ('-' is not a word char).
+  if [[ -n "$hosts" && " ${hosts//$'\t'/ } " != *" $me "* ]]; then
     if [[ -e "$dst" ]]; then
       launchctl bootout "gui/$uid/$label" 2>/dev/null || true
       rm -f "$dst"

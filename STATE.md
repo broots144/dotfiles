@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-06 by Claude (bug sweep, branch fix/bugs-2026-11-06): 12 verified bugs fixed in the sync and backup scripts, the iCloud EDEADLK item resolved, a fifth test (dev-sync-lock).
+Last updated: 2026-11-06 by Claude (test coverage, branch tests/coverage-2026-11-06c): 9 new tests, `script/coverage`, CI runs the suite on macOS; one bug fixed in install-launchd.sh (host marker matched n0 against n0-2).
 
 ## Phases
 
@@ -55,13 +55,27 @@ Last updated: 2026-11-06 by Claude (bug sweep, branch fix/bugs-2026-11-06): 12 v
   the new one skip. dev-push-to-n0 exits 4 when an rsync comparison fails (rsync 23/24, a file
   vanished, are reported and not fatal). A local refs cache entry is seeded once from a matching
   iCloud `.refs`, which is then removed.
-- Tests: `script/test` runs 5 regression tests (`brew-sync-push`, `dev-icloud-backup`, `dev-pull`,
-  `dev-sync-lock`, `untrusted-input`); all pass on n0 2026-11-06.
+- Tests: `script/test` runs 14 regression tests (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
+  `brew-wrapper`, `check-state`, `dev-icloud-backup`, `dev-icloud-backup-edges`, `dev-pull`,
+  `dev-pull-edges`, `dev-push-to-n0`, `dev-sync-from-n0`, `dev-sync-lock`, `install-launchd`,
+  `untrusted-input`); all pass on n0 2026-11-06 under Homebrew bash and under /bin/bash 3.2.
+  The MacBook sync tests reach a fake n0 (a directory) through an ssh stub
+  (`test/lib/fake-n0.sh`); GitHub is unreachable in them; brew, mas, scutil, launchctl and
+  onfire-notify are stubs. `bin/brew-nightly` takes `BREW_NIGHTLY_PATH` for its test.
+- Coverage: `script/coverage` (`just coverage`, bash 4.1 or later) traces every bash process the
+  suite starts and reports approximate line coverage of the maintained bash scripts: 51% before
+  this branch (282 of 551 statements), 96% after (534 of 551). The zsh scripts (`brew-reconcile`,
+  `functions/brew`, the prompt) are tested but not measured.
+- CI: `.github/workflows/tests.yml` runs syntax, shellcheck, plist lint and the suite on
+  macos-latest for pull requests and pushes to master (suite under /bin/bash 3.2, coverage in
+  the job summary, not gated).
+- install-launchd.sh matches the `dotfiles-hosts` marker on whole names: `grep -w n0` also matched
+  a marker naming `n0-2` (fixed on this branch, pinned by `test/install-launchd.sh`).
 - `state-guard.yml` uses `actions/checkout` v7.0.1, SHA pinned (PR #9, 2026-11-06).
 - `script/check-state` skips merge commits (`git log --no-merges`), so the chore:/deps:/brew:
   exemption now works on PRs, where HEAD is GitHub's synthetic merge commit (PR #9, self-tested).
-- No CI existed before this retrofit; `.github/workflows/state-guard.yml` now checks PRs only, so the
-  unattended `brew:` pushes to `master` are not gated.
+- `.github/workflows/state-guard.yml` checks PRs only; `tests.yml` also runs on pushes to master
+  (reports, does not block, the unattended `brew:` pushes).
 
 ## Verify output (P6, 2026-11-06, n0)
 

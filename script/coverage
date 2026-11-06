@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+#
+# Approximate line coverage of the maintained bash scripts while script/test runs.
+# Every bash process the tests start reads $BASH_ENV, which turns on xtrace into a log
+# (BASH_XTRACEFD, bash >= 4.1; under an older bash the script still runs, untraced).
+# A line counts as covered when xtrace reports a command on it. "Executable" lines are a
+# heuristic (as in bashcov/kcov): blank lines, comments, bare keywords (then, fi, done, ...),
+# function headers, case patterns, array literal bodies and continuation lines are left out.
+#
+#   script/coverage            run the suite, print per-file and total coverage
+#   script/coverage -u FILE    also list FILE's executable lines that never ran
+#   COVERAGE_MIN=70 script/coverage   exit 1 when the total is below 70%
+set -euo pipefail
+cd "$(dirname "$0")/.."
+(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) )) \
+  || { echo "script/coverage needs bash >= 4.1 (this is $BASH_VERSION)" >&2; exit 2; }
+show=""; [[ "${1:-}" == "-u" ]] && show="${2:?file}"
+
+files=(bin/brew-nightly bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0
+       lib/dev-tree.sh macos/install-launchd.sh script/check-state)
+
+t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
+export COVERAGE_LOG="$t/trace"
+: > "$COVERAGE_LOG"
+# eval: a bash 3.2 child must not fail to parse the {fd} redirection.
+cat > "$t/env.sh" <<'ENV'
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) )); then
+  eval 'exec {__cov_fd}>>"$COVERAGE_LOG"'; BASH_XTRACEFD=$__cov_fd
+  PS4='+@COV@${BASH_SOURCE[0]:-}@${LINENO}@ '; set -x
+fi
+ENV
+export BASH_ENV="$t/env.sh"
+rc=0; script/test || rc=$?
+unset BASH_ENV
+(( rc == 0 )) || echo "script/coverage: the suite failed (exit $rc); coverage below is partial" >&2
+
+# Hits: "<abs or relative source path>@<line>". Paths are folded to the repo-relative name.
+grep -aoE '^\++@COV@[^@]*@[0-9]+@' "$COVERAGE_LOG" | sed -E 's/^\++@COV@//; s/@$//' | sort -u > "$t/hits.raw"
+: > "$t/hits"
+for f in "${files[@]}"; do
+  grep -aE "(^|/)${f//./\\.}@[0-9]+$" "$t/hits.raw" | sed -E "s#.*@#$f@#" >> "$t/hits" || true
+done
+
+# Executable statements of one file, one per output line: its line numbers (a statement
+# continued with a backslash spans several; it counts as run when xtrace names any of them).
+executable() {
+  awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    {
+      raw = $0; s = trim($0)
+      if (heredoc != "") { if (s == heredoc) heredoc = ""; next }
+      cont = prevcont; prevcont = (s ~ /\\$/)
+      if (cont && grp != "") { grp = grp " " NR; if (!prevcont) { print grp; grp = "" }; next }
+      if (inarr) { if (s ~ /^\)/ || s ~ /[^\\]\)[ \t]*(#.*)?$/) inarr = 0; next }
+      if (s == "" || s ~ /^#/) next
+      if (match(s, /<<-?[ \t]*["\x27]?[A-Za-z_]+["\x27]?/)) {
+        h = substr(s, RSTART, RLENGTH); gsub(/<<-?[ \t]*|["\x27]/, "", h); heredoc = h
+      }
+      if (s ~ /^[A-Za-z_][A-Za-z0-9_]*=\([ \t]*(#.*)?$/) { inarr = 1; next }
+      if (s ~ /^(then|else|fi|do|done|esac|\{|\}|;;|\)|in)([ \t;].*)?$/ && s !~ /^(done|\})[ \t]*[|&]/) next
+      if (s ~ /^[A-Za-z_][A-Za-z0-9_-]*\(\)[ \t]*\{[ \t]*(#.*)?$/) next
+      if (s ~ /^[^()]*\)[ \t]*$/ || s ~ /^[^ ()]+\)[ \t]*;;[ \t]*$/) next
+      if (s ~ /^(case|for|while|until|if|elif) .*(in|do|then)[ \t]*(#.*)?$/ && s !~ /;/ && s !~ /^(if|elif|while|until)/) next
+      if (prevcont) { grp = NR; next }
+      print NR
+    }
+    END { if (grp != "") print grp }' "$1"
+}
+
+tot_e=0; tot_h=0
+printf '%-26s %6s %6s %7s\n' file lines hit cover
+for f in "${files[@]}"; do
+  executable "$f" > "$t/exec"
+  { grep -E "^$f@" "$t/hits" || true; } | sed "s/.*@//" | sort -n -u > "$t/hit"
+  e=$(wc -l < "$t/exec" | tr -d ' ')
+  h=$(awk 'NR == FNR { hit[$1] = 1; next } { for (i = 1; i <= NF; i++) if ($i in hit) { n++; break } } END { print n + 0 }' "$t/hit" "$t/exec")
+  tot_e=$((tot_e + e)); tot_h=$((tot_h + h))
+  printf '%-26s %6d %6d %6d%%\n' "$f" "$e" "$h" $(( e ? h * 100 / e : 100 ))
+  if [[ "$f" == "$show" ]]; then
+    awk 'NR == FNR { hit[$1] = 1; next } { for (i = 1; i <= NF; i++) if ($i in hit) next; print $1 }' "$t/hit" "$t/exec" | while read -r n; do printf '  %4d  %s\n' "$n" "$(sed -n "${n}p" "$f")"; done > "$t/missed"
+  fi
+done
+pct=$(( tot_e ? tot_h * 100 / tot_e : 100 ))
+printf '%-26s %6d %6d %6d%%\n' TOTAL "$tot_e" "$tot_h" "$pct"
+[[ -n "$show" && -s "$t/missed" ]] && { echo "never ran in $show:"; cat "$t/missed"; }
+(( pct >= ${COVERAGE_MIN:-0} )) || { echo "coverage $pct% is below COVERAGE_MIN=${COVERAGE_MIN}%" >&2; exit 1; }
+exit "$rc"
