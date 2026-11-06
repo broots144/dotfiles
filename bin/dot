@@ -118,6 +118,13 @@ $ZSH/macos/set-defaults.sh
 # Install homebrew
 $ZSH/homebrew/install.sh 2>&1
 
+# A fresh install is not on PATH yet (Apple silicon: /opt/homebrew).
+if ! command -v brew >/dev/null 2>&1; then
+	for b in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+		[ -x "$b" ] && { eval "$("$b" shellenv)"; break; }
+	done
+fi
+
 # Upgrade homebrew
 echo "› brew update"
 brew update
