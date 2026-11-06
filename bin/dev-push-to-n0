@@ -37,8 +37,16 @@ n=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
 
 rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "ssh -o BatchMode=yes -o ConnectTimeout=10")
 # Without --update: everything that differs. With --update: only what is newer here.
-/usr/bin/rsync -n "${rs[@]:1}" "$dev/" n0:dev/ 2>"$work/err" | grep -v '/$' > "$work/differs" || true
-/usr/bin/rsync -n "${rs[@]:1}" -u "$dev/" n0:dev/ 2>>"$work/err" | grep -v '/$' > "$work/newer-here" || true
+# A failed comparison must not read as "nothing newer here": rsync's status is checked on its own.
+compare() {  # <out> [rsync args...]
+  local out="$1"; shift
+  /usr/bin/rsync -n "${rs[@]:1}" "$@" "$dev/" n0:dev/ > "$out.raw" 2>>"$work/err" \
+    || { echo "rsync failed: $(tail -1 "$work/err")" >&2; exit 4; }
+  grep -v '/$' "$out.raw" > "$out" || true
+}
+: > "$work/err"
+compare "$work/differs"
+compare "$work/newer-here" -u
 grep -vxF -f "$work/newer-here" "$work/differs" > "$work/newer-on-n0" || true
 
 echo "$n private files listed here"
