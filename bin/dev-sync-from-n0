@@ -94,15 +94,22 @@ if [[ "$me" == "n0" ]]; then
 fi
 mkdir -p "$state" "$dev"
 
-# One run at a time: a first clone can outlast the 20-minute interval.
-if ! mkdir "$state/lock" 2>/dev/null; then
-  pid=$(cat "$state/lock/pid" 2>/dev/null || true)
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then say "another run (pid $pid) is active; skipped"; exit 0; fi
-  rm -rf "$state/lock"; mkdir "$state/lock" || exit 1
+# One run at a time: a first clone can outlast the 20-minute interval. The lock is a symlink
+# whose target is the owner's pid, so lock and pid appear in one atomic step (a mkdir lock
+# with the pid written after it let a second run find no pid and take over). A pid counts as
+# live only while it is a dev-sync-from-n0 process (pids get reused).
+lock="$state/lock.pid"
+if ! ln -s "$$" "$lock" 2>/dev/null; then
+  pid=$(readlink "$lock" 2>/dev/null || true)
+  if [[ -n "$pid" ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q dev-sync-from-n0; then
+    say "another run (pid $pid) is active; skipped"; exit 0
+  fi
+  rm -f "$lock"
+  ln -s "$$" "$lock" 2>/dev/null || { say "another run took the lock; skipped"; exit 0; }
 fi
-echo $$ > "$state/lock/pid"
+rm -rf "$state/lock"   # the old mkdir lock
 work=$(mktemp -d)
-trap 'rm -rf "$work" "$state/lock"' EXIT
+trap 'rm -rf "$work"; rm -f "$lock"' EXIT
 
 if ! "${ssh_n0[@]}" true 2>/dev/null; then
   say "n0 unreachable; skipped"
