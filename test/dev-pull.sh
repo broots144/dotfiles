@@ -61,5 +61,20 @@ list=$(dev_tree_private_files "$HOME/dev/" "$t/w" | tr '\0' '\n')
 ok grep -qx 'edits/secrets.local' <<<"$list"
 ok bash -c '! grep -q "x.enc.yaml" <<<"$1"' _ "$list"
 
+# WIP snapshot (own repos only; DEV_PULL_OWN_RE marks the local upstream as own, a stub stands in
+# for gitleaks): files inside a secret-named directory stay out of the pushed commit.
+setup wipt; git -C "$HOME/dev/wipt" pull -q
+printf 'b\n' > "$HOME/dev/wipt/README"
+mkdir -p "$HOME/dev/wipt/secrets" "$HOME/dev/wipt/credentials"
+printf 'plain\n' > "$HOME/dev/wipt/secrets/plain.yaml"; printf 'k\n' > "$HOME/dev/wipt/credentials/a"
+printf 'n\n' > "$HOME/dev/wipt/notes.txt"
+printf '#!/bin/sh\nexit 0\n' > "$t/gitleaks-ok"; chmod +x "$t/gitleaks-ok"
+DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS="$t/gitleaks-ok" "$here/bin/dev-pull" >/dev/null 2>&1 || true
+wref=$(git -C "$t/up/wipt" for-each-ref --format='%(refname)' 'refs/wip/*' | head -1)
+ok [ -n "$wref" ]
+snap=$(git -C "$t/up/wipt" ls-tree -r --name-only "${wref:-HEAD}")
+ok grep -qx notes.txt <<<"$snap"
+ok bash -c '! grep -q "^secrets/plain.yaml$\|^credentials/" <<<"$1"' _ "$snap"
+
 (( fail == 0 )) && echo "dev-pull: ok"
 exit "$fail"
