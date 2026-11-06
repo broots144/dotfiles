@@ -55,8 +55,9 @@ finish() {
 }
 
 # An emptied or unmounted ~/dev must not be mirrored (with --delete) over a good backup.
-n_src=$(find "$src" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
-n_dst=$(find "$dst" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+# The probes tolerate a missing or unreadable directory (pipefail would end the run silently).
+n_src=$( { find "$src" -mindepth 1 -maxdepth 1 2>/dev/null || true; } | wc -l | tr -d ' ')
+n_dst=$( { find "$dst" -mindepth 1 -maxdepth 1 2>/dev/null || true; } | wc -l | tr -d ' ')
 if (( n_src == 0 || n_src * 2 < n_dst )); then
   echo "$(date -u +%FT%TZ) $src has $n_src entries, mirror has $n_dst; refusing to mirror or archive" >&2
   status=6
@@ -73,7 +74,7 @@ args=("${DEV_TREE_RSYNC_EXCLUDES[@]}")
 git_safe=("${DEV_TREE_GIT[@]}")
 
 keys="$HOME/.config/sops/age/keys.txt"
-recipient=$(sed -n 's/^# public key: //p' "$keys" 2>/dev/null | head -1)
+recipient=$( { sed -n 's/^# public key: //p' "$keys" 2>/dev/null || true; } | head -1)
 age=$(command -v age || echo /opt/homebrew/bin/age)
 
 if [[ ${#dry[@]} -gt 0 ]]; then

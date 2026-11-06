@@ -6,7 +6,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
-export HOME="$t/home"
+export HOME="$t/home" ZSH="$here"
 icloud="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
 keys="$HOME/.config/sops/age/keys.txt"
 mkdir -p "$icloud" "$HOME/.config/sops/age" "$HOME/dev/app/credentials" "$HOME/dev/other"
@@ -53,6 +53,17 @@ mv "$HOME/dev" "$t/dev.away"; mkdir "$HOME/dev"
 "$here/bin/dev-icloud-backup" >/dev/null 2>&1 && { echo "FAIL: empty source accepted"; fail=1; }
 [[ -e "$root/dev/app/README.md" ]] || { echo "FAIL: empty source wiped the mirror"; fail=1; }
 [[ "$(shasum "$root/dev-secrets.tar.age")" == "$before" ]] || { echo "FAIL: empty source replaced the archive"; fail=1; }
+
+# No age key: reported as exit 3 with LAST_RUN.json, the mirror still made. No ~/dev: exit 6.
+rm -rf "${HOME:?}/dev"; mv "$t/dev.away" "$HOME/dev"; mv "$keys" "$t/keys.away"
+"$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
+[[ $rc == 3 ]] || { echo "FAIL: no age key exited $rc, want 3"; fail=1; }
+grep -q '"exit":3' "$root/LAST_RUN.json" || { echo "FAIL: no age key, LAST_RUN.json not written"; fail=1; }
+mv "$t/keys.away" "$keys"; mv "$HOME/dev" "$t/dev.away"
+"$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
+[[ $rc == 6 ]] || { echo "FAIL: missing ~/dev exited $rc, want 6"; fail=1; }
+grep -q '"exit":6' "$root/LAST_RUN.json" || { echo "FAIL: missing ~/dev, LAST_RUN.json not written"; fail=1; }
+mv "$t/dev.away" "$HOME/dev"
 
 (( fail == 0 )) && echo "ok dev-icloud-backup"
 exit "$fail"
