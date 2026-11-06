@@ -79,10 +79,34 @@ grep -q '"exit":0' "$root/LAST_RUN.json" || { echo "FAIL: LAST_RUN.json not upda
 # One unreadable directory must not end the run before anything is archived or mirrored.
 mkdir -p "$HOME/dev/other/locked"; chmod 000 "$HOME/dev/other/locked"; echo z > "$HOME/dev/other/new2.txt"
 "$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
-chmod 755 "$HOME/dev/other/locked"
+chmod 755 "$HOME/dev/other/locked"; rmdir "$HOME/dev/other/locked"
+chmod 755 "$root/dev/other/locked" 2>/dev/null || true   # rsync copied the mode into the mirror
 [[ -e "$root/dev/other/new2.txt" ]] || { echo "FAIL: unreadable directory stopped the mirror (exit $rc)"; fail=1; }
 grep -q '"finished_at"' "$root/LAST_RUN.json" && [[ "$root/LAST_RUN.json" -nt "$HOME/dev/other/new2.txt" ]] \
   || { echo "FAIL: unreadable directory, LAST_RUN.json not written"; fail=1; }
+
+# Gitignored directories are default-deny too (TV pairing tokens in tv-fleet/private/ were
+# mirrored in plaintext, 2026-11-06): nothing under one reaches the mirror; its small files
+# are archived; rebuildable output and big ignored files are only kept out of the mirror.
+p="$HOME/dev/app"
+mkdir -p "$p/private/tokens" "$p/target/debug" "$p/private/node_modules/m"
+printf 'tok\n' > "$p/private/tokens/living-room.token"; printf 'pin\n' > "$p/private/pins.toml"
+printf 'b\n' > "$p/target/debug/out.bin"; printf 'm\n' > "$p/private/node_modules/m/i.js"
+dd if=/dev/zero of="$p/private/big.db" bs=1024 count=1100 2>/dev/null
+dd if=/dev/zero of="$p/huge.sqlite" bs=1024 count=1100 2>/dev/null
+printf 'private-notes.txt\nprivate/\ntarget/\nhuge.sqlite\n' > "$p/.gitignore"
+printf 'tv\n' > "$p/remote.token"     # a token file that is not ignored: secret name
+out=$("$here/bin/dev-icloud-backup" 2>&1) || { echo "FAIL: backup with ignored dirs exited non-zero: $out"; fail=1; }
+for f in private private/tokens/living-room.token private/pins.toml private/big.db target huge.sqlite remote.token; do
+  [[ -e "$root/dev/app/$f" ]] && { echo "FAIL: ignored $f mirrored in plaintext"; fail=1; }
+done
+listed="$(age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -tf -)"
+for f in app/private/tokens/living-room.token app/private/pins.toml app/remote.token; do
+  grep -qxF "$f" <<<"$listed" || { echo "FAIL: $f missing from encrypted archive"; fail=1; }
+done
+for f in app/private/big.db app/target/debug/out.bin app/private/node_modules/m/i.js app/huge.sqlite; do
+  grep -qxF "$f" <<<"$listed" && { echo "FAIL: $f should not be archived"; fail=1; }
+done
 
 (( fail == 0 )) && echo "ok dev-icloud-backup"
 exit "$fail"

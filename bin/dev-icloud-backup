@@ -15,8 +15,10 @@
 # to the age public key in ~/.config/sops/age/keys.txt, whose private half is not in iCloud:
 #   - dev-secrets.tar.age: files with a secret-bearing name (OpenTofu state and tfvars, .env,
 #     OAuth tokens, private keys, kubeconfigs, agent local settings, ...), every gitignored
-#     file up to 1 MiB that sits outside an ignored directory (default-deny for secret names
-#     the list misses), and each repo's .git/config. Dated copies are kept in secrets-history/.
+#     file up to 1 MiB, also inside gitignored directories (default-deny for secret names the
+#     list misses; rebuildable output such as target/ is left out), and each repo's
+#     .git/config. Gzipped inside the age stream (tar -xf detects it). Dated copies are kept in
+#     secrets-history/. Nothing gitignored, of any size, is in the plaintext mirror.
 #   - git/<repo>.bundle.age: every repo's history (all branches, tags, stash), rebuilt only
 #     when its refs change. The plaintext mirror never holds a .git directory, because a
 #     secret that was ever staged or committed lives on in the object store.
@@ -100,7 +102,7 @@ else
   if (( n == 0 )); then
     echo "$(date -u +%FT%TZ) no secret files found; keeping the previous archive" >&2
     status=4
-  elif tar --null -cf - -C "$src" -T "$work/list" | "$age" -r "$recipient" -o "$tmp" \
+  elif tar --null -czf - -C "$src" -T "$work/list" | "$age" -r "$recipient" -o "$tmp" \
       && mv -f "$tmp" "$root/dev-secrets.tar.age" \
       && cp -f "$root/dev-secrets.tar.age" "$hist/dev-secrets-$(date +%F).tar.age"; then
     echo "$(date -u +%FT%TZ) archived $n secret files (encrypted)"
