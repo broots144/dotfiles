@@ -38,6 +38,8 @@ Last updated: 2026-11-06 by Claude (repo-state retrofit): state files, justfile 
 - Tests: `script/test` runs 4 regression tests (`brew-sync-push`, `dev-icloud-backup`, `dev-pull`,
   `untrusted-input`); all pass on n0 2026-11-06.
 - `state-guard.yml` uses `actions/checkout` v7.0.1, SHA pinned (PR #9, 2026-11-06).
+- `script/check-state` skips merge commits (`git log --no-merges`), so the chore:/deps:/brew:
+  exemption now works on PRs, where HEAD is GitHub's synthetic merge commit (PR #9, self-tested).
 - No CI existed before this retrofit; `.github/workflows/state-guard.yml` now checks PRs only, so the
   unattended `brew:` pushes to `master` are not gated.
 
@@ -59,9 +61,6 @@ verify-phase-6 ok
 
 ## Open / BLOCKED
 
-- `script/check-state` on pull requests reads `git log base..HEAD`, and the PR checkout HEAD is
-  GitHub's synthetic merge commit (`Merge <sha> into <sha>`), so the chore:/deps:/brew: exemption
-  never applies on a PR. Next: use `git log --no-merges` there, with a self-test case.
 - dev-icloud-backup on n0 failed 2026-11-06 08:46Z: writing
   `Backups/n0/git/birdnet-go.refs` in iCloud Drive returned "Resource deadlock avoided" (EDEADLK
   from the iCloud file provider) at `bin/dev-icloud-backup` line 117, and the script exited 1 before
