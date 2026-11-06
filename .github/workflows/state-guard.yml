@@ -1,0 +1,21 @@
+name: state-guard
+# Repo-state pattern (docs/DECISIONS.md D-008). Pull requests only: the unattended brew:
+# pushes to master are not gated.
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  state-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Self-test
+        run: script/check-state --self-test
+      - name: STATE.md updated with code changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: script/check-state "$BASE_SHA"
