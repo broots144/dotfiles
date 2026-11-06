@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# STATE.md guard (repo-state pattern, D-008). Fails when the commits in <base>..HEAD change
+# code without changing STATE.md. Docs-only changes pass. Escape hatch: every commit subject
+# in the range starts with chore:, deps: or brew: (the unattended Brewfile commits).
+#
+#   script/check-state <base-ref>    check <base>..HEAD
+#   script/check-state --self-test   run against a throwaway repo
+set -euo pipefail
+
+check() {  # <base>
+  local base="$1" files code=0 subj
+  files=$(git diff --name-only "$base"...HEAD)
+  [[ -z "$files" ]] && { echo "state-guard: no changes"; return 0; }
+  printf '%s\n' "$files" | grep -qx 'STATE.md' && { echo "state-guard: STATE.md updated"; return 0; }
+  while IFS= read -r f; do
+    case "$f" in *.md|LICENSE*) ;; *) code=1 ;; esac
+  done <<< "$files"
+  (( code == 0 )) && { echo "state-guard: docs only"; return 0; }
+  while IFS= read -r subj; do
+    case "$subj" in chore:*|chore\(*|deps:*|deps\(*|brew:*) ;; *)
+      echo "state-guard: code changed without a STATE.md update (commit: $subj)" >&2
+      echo "Update STATE.md, or use a chore:/deps:/brew: commit for changes that do not alter state." >&2
+      return 1 ;;
+    esac
+  done < <(git log --format=%s "$base"..HEAD)
+  echo "state-guard: exempt commits only"
+}
+
+self_test() {
+  local t fail=0
+  t="$(mktemp -d)"; trap 'rm -rf "$t"' RETURN
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid \
+    GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+  cd "$t"; git init -q; echo a > STATE.md; echo a > x.sh; git add .; git commit -qm init
+  git branch base
+  c() { echo "$RANDOM" >> "$1"; git add "$1"; git commit -qm "$2"; }
+  expect() { (check base >/dev/null 2>&1) && r=pass || r=fail; [[ $r == "$1" ]] || { echo "FAIL: $2 ($r)"; fail=1; }; git reset -q --hard base; }
+  c x.sh "zsh: change";                    expect fail "code without STATE.md"
+  c x.sh "zsh: change"; c STATE.md "state"; expect pass "code with STATE.md"
+  c README.md "docs";                       expect pass "docs only"
+  c x.sh "brew: add jq";                    expect pass "brew escape hatch"
+  c x.sh "chore: tidy"; c x.sh "fix: y";    expect fail "mixed exempt and code"
+  (( fail == 0 )) && echo "ok check-state"
+  return "$fail"
+}
+
+case "${1:-}" in
+  --self-test) self_test ;;
+  "") echo "usage: $0 <base-ref> | --self-test" >&2; exit 2 ;;
+  *) check "$1" ;;
+esac
