@@ -31,7 +31,7 @@ root="$(echo "$icloud"/Backups/*)"
 listed="$(age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -tf -)"
 
 fail=0
-mkdir "$t/x"; age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -xf - -C "$t/x"
+mkdir "$t/x"; age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -xzf - -C "$t/x"   # the documented restore
 for f in "${secret[@]}"; do
   [[ -e "$root/dev/app/$f" ]] && { echo "FAIL: $f mirrored in plaintext"; fail=1; }
   [[ -f "$t/x/app/$f" ]] || { echo "FAIL: $f missing from encrypted archive"; fail=1; }
@@ -107,6 +107,25 @@ done
 for f in app/private/big.db app/target/debug/out.bin app/private/node_modules/m/i.js app/huge.sqlite; do
   grep -qxF "$f" <<<"$listed" && { echo "FAIL: $f should not be archived"; fail=1; }
 done
+
+# The MacBook sync carries gitignored files outside ignored directories, as before; the files
+# inside ignored directories are archived only (scratch/, logs/, private/ stay on their machine).
+. "$here/lib/dev-tree.sh"
+mkdir "$t/w"; dev_tree_lists "$HOME/dev/" "$t/w"
+synced="$(dev_tree_private_files "$HOME/dev/" "$t/w" | tr '\0' '\n')"
+grep -qxF app/private-notes.txt <<<"$synced" || { echo "FAIL: ignored file outside an ignored dir not in the sync manifest"; fail=1; }
+grep -qxF app/private/pins.toml <<<"$synced" && { echo "FAIL: file inside an ignored dir in the sync manifest"; fail=1; }
+# A failed list write is a failed scan (status 6 in the backup), not a silent partial one.
+rm -f "$t/w/rules"; mkdir "$t/w/rules"   # the rules list cannot be written
+dev_tree_lists "$HOME/dev/" "$t/w" 2>/dev/null && { echo "FAIL: unwritable rules list, dev_tree_lists returned 0"; fail=1; }
+
+# An old iCloud .refs that matches is moved into the local cache once: no rebuild, and the
+# iCloud copy is gone so later nights never read it.
+c="$HOME/.local/state/dev-icloud-backup/git"
+rm -rf "$root/git/app.refs"; mv "$c/app.refs" "$root/git/app.refs"
+out=$("$here/bin/dev-icloud-backup" 2>&1) || true
+grep -q 'rebuilt 0 git bundle' <<<"$out" || { echo "FAIL: matching iCloud .refs rebuilt the bundle: $out"; fail=1; }
+[[ -s "$c/app.refs" && ! -e "$root/git/app.refs" ]] || { echo "FAIL: iCloud .refs not moved into the local cache"; fail=1; }
 
 (( fail == 0 )) && echo "ok dev-icloud-backup"
 exit "$fail"

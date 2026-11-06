@@ -32,7 +32,10 @@ Last updated: 2026-11-06 by Claude (bug sweep, branch fix/bugs-2026-11-06): 12 v
   rule (before, they were mirrored in plaintext: TV tokens, private/ dirs, tablet backups);
   small files inside ignored directories are archived, except rebuildable output
   (`DEV_TREE_REBUILDABLE`: target, build, .wrangler, .pio, ...); the archive is gzipped inside
-  age (about 200 MB per night measured on n0, was 16 MB; 14 generations kept). The refs cache
+  age (about 200 MB per night measured on n0, was 16 MB; 14 generations kept; restore with
+  `tar -xzf -`). Those files inside ignored directories go in a separate list (`ignoredd`)
+  that the MacBook sync does not read: the laptop sync scope (`--manifest`, dev-push-to-n0) is
+  unchanged by the bug sweep (scratch/, logs/, cache/, private/ dirs stay on their machine). The refs cache
   for git bundles lives in `~/.local/state/dev-icloud-backup/git`, not iCloud; a failed write
   into iCloud, an unreadable directory, a missing age key or a missing ~/dev each end in a
   status code and LAST_RUN.json instead of a silent abort.
@@ -47,7 +50,11 @@ Last updated: 2026-11-06 by Claude (bug sweep, branch fix/bugs-2026-11-06): 12 v
   missing gitleaks withholds the push; the local record of a snapshot is dropped only once the
   remote ref is really gone. `DEV_PULL_OWN_RE` / `DEV_PULL_GITLEAKS` exist for the tests.
 - dev-sync-from-n0's run lock is a symlink `lock.pid -> <pid>` (atomic; pid checked to be a
-  sync process). dev-push-to-n0 exits 4 when an rsync comparison fails.
+  sync process); a stale lock is removed only if it still names the stale pid, the exit trap
+  removes it only while it names this run, and a live run of the old mkdir-lock version makes
+  the new one skip. dev-push-to-n0 exits 4 when an rsync comparison fails (rsync 23/24, a file
+  vanished, are reported and not fatal). A local refs cache entry is seeded once from a matching
+  iCloud `.refs`, which is then removed.
 - Tests: `script/test` runs 5 regression tests (`brew-sync-push`, `dev-icloud-backup`, `dev-pull`,
   `dev-sync-lock`, `untrusted-input`); all pass on n0 2026-11-06.
 - `state-guard.yml` uses `actions/checkout` v7.0.1, SHA pinned (PR #9, 2026-11-06).

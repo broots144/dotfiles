@@ -17,13 +17,14 @@
 #     OAuth tokens, private keys, kubeconfigs, agent local settings, ...), every gitignored
 #     file up to 1 MiB, also inside gitignored directories (default-deny for secret names the
 #     list misses; rebuildable output such as target/ is left out), and each repo's
-#     .git/config. Gzipped inside the age stream (tar -xf detects it). Dated copies are kept in
+#     .git/config. Gzipped inside the age stream (archives before 2026-11-06 are plain tar). Dated copies are kept in
 #     secrets-history/. Nothing gitignored, of any size, is in the plaintext mirror.
 #   - git/<repo>.bundle.age: every repo's history (all branches, tags, stash), rebuilt only
 #     when its refs change. The plaintext mirror never holds a .git directory, because a
 #     secret that was ever staged or committed lives on in the object store.
 # Restore into a staging directory, then compare before copying anything back over ~/dev:
-#   mkdir /tmp/restore && age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xf - -C /tmp/restore
+#   mkdir /tmp/restore && age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xzf - -C /tmp/restore
+#     (drop the z for an archive from before 2026-11-06; macOS bsdtar detects either with -xf)
 #   age -d -i ~/.config/sops/age/keys.txt git/<repo>.bundle.age > /tmp/r.bundle && git clone /tmp/r.bundle <dir>
 #
 # Run by macos/com.broots.dev-icloud-backup.plist; by hand: dev-icloud-backup [-n]
@@ -95,7 +96,7 @@ elif [[ -z "$recipient" ]]; then
   status=3
 else
   # The encrypted archive first, so a file newly kept out of the mirror is never in neither copy.
-  cat "$work/named" "$work/ignored" "$work/gitcfg" | sort -zu > "$work/list"
+  cat "$work/named" "$work/ignored" "$work/ignoredd" "$work/gitcfg" | sort -zu > "$work/list"
   n=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
   tmp="$root/.dev-secrets.tar.age.tmp"; hist="$root/secrets-history"
   mkdir -p "$hist"
@@ -116,7 +117,8 @@ else
 
   # Git history as encrypted bundles, rebuilt only when a repo's refs changed. The refs cache
   # lives on local disk: an evicted .refs file in iCloud Drive failed to open (EDEADLK) and
-  # ended the run. The old iCloud copy is still read once so the move rebuilds nothing.
+  # ended the run. A repo with no local entry yet takes the old iCloud one once (copied here,
+  # then removed from iCloud), so the move rebuilds nothing and iCloud .refs are not read again.
   mkdir -p "$root/git" "$cache"
   built=0
   while IFS= read -r -d '' g; do
@@ -125,7 +127,14 @@ else
     [[ -n "$refs" ]] || continue
     sum=$(printf '%s\n' "$refs" | shasum -a 256 | cut -d' ' -f1)
     refs_f="$cache/$name.refs"
-    [[ -f "$root/git/$name.bundle.age" && "$(cat "$refs_f" 2>/dev/null || cat "$root/git/$name.refs" 2>/dev/null || true)" == "$sum" ]] && continue
+    cached=$(cat "$refs_f" 2>/dev/null || true)
+    if [[ -z "$cached" && -e "$root/git/$name.refs" ]]; then
+      cached=$(cat "$root/git/$name.refs" 2>/dev/null || true)
+      if [[ -n "$cached" ]] && printf '%s\n' "$cached" > "$refs_f.tmp" 2>/dev/null && mv -f "$refs_f.tmp" "$refs_f"; then
+        rm -f "$root/git/$name.refs" 2>/dev/null || true
+      fi
+    fi
+    [[ -f "$root/git/$name.bundle.age" && "$cached" == "$sum" ]] && continue
     if "${git_safe[@]}" -C "$src$r" bundle create -q "$work/b.bundle" --all 2>/dev/null \
         && "$age" -r "$recipient" -o "$root/git/.$name.tmp" "$work/b.bundle" \
         && mv -f "$root/git/.$name.tmp" "$root/git/$name.bundle.age"; then

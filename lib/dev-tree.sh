@@ -110,13 +110,18 @@ dev_tree_private_files() {
 # dev_tree_lists <src/> <workdir>: writes NUL-separated lists, relative to <src>, into <workdir>:
 #   repos    every .git directory (nested ones too), bulk folders pruned
 #   named    files and directories with a secret-bearing name (bulk folders and .git pruned)
-#   ignored  gitignored regular files up to 1 MiB, including the files inside gitignored
-#            directories (rebuildable ones in DEV_TREE_REBUILDABLE and bulk folders left out)
+#   ignored  gitignored regular files up to 1 MiB that sit outside a gitignored directory
+#   ignoredd regular files up to 1 MiB inside gitignored directories (rebuildable ones in
+#            DEV_TREE_REBUILDABLE and bulk folders left out). Archive only: the MacBook sync
+#            (dev_tree_private_files) does not read it, so scratch/, logs/, cache/ and private/
+#            dirs stay on the machine that made them and are not copied both ways every 20 min.
 #   gitcfg   each repo's .git/config
 #   rules    rsync exclude rules ('- /path') for every gitignored file and directory, of any
 #            size: default-deny, nothing gitignored reaches the plaintext mirror
 # Also fills DEV_TREE_RSYNC_EXCLUDES with --exclude args for .git, the bulk folders and the
 # secret names (case-insensitive).
+# Returns non-zero when a list could not be written (the callers refuse to mirror on that);
+# find and git errors on single entries are tolerated, the scan keeps what it could list.
 dev_tree_lists() {
   local src="$1" work="$2" e g r f p q sz bulk_re rebuild_re prune=()
   DEV_TREE_RSYNC_EXCLUDES=(--exclude .git/)
@@ -135,8 +140,8 @@ dev_tree_lists() {
   named=( \( "${named[@]:1}" \) )
 
   # Lists are NUL-separated so any legal file name survives.
-  { (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) || true; } | dev_tree_strip > "$work/named"
-  dev_tree_repos "$src" "$work/repos"
+  { (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) || true; } | dev_tree_strip > "$work/named" || return 1
+  dev_tree_repos "$src" "$work/repos" || return 1
 
   # Inside an ignored directory: skip .git, bulk folders and rebuildable output.
   bulk_re=$(dev_tree_skip_re "${DEV_TREE_EXCLUDES[@]}")
@@ -146,10 +151,10 @@ dev_tree_lists() {
   done
   prune=( \( "${prune[@]:1}" \) )
 
-  : > "$work/ignored"; : > "$work/gitcfg"; : > "$work/rules"
+  : > "$work/ignored" && : > "$work/ignoredd" && : > "$work/gitcfg" && : > "$work/rules" || return 1
   while IFS= read -r -d '' g; do
     r="${g%/.git}"
-    [[ -f "$src$g/config" ]] && printf '%s\0' "$g/config" >> "$work/gitcfg"
+    if [[ -f "$src$g/config" ]]; then printf '%s\0' "$g/config" >> "$work/gitcfg" || return 1; fi
     while IFS= read -r -d '' f; do
       p="$r/${f%/}"
       [[ -e "$src$p" && ! -L "$src$p" ]] || continue
@@ -159,17 +164,18 @@ dev_tree_lists() {
       dev_tree_in_named "$p" "$work/named" && continue
       q="${p//\*/\\*}"; q="${q//\?/\\?}"; q="${q//\[/\\[}"
       if [[ "$f" == */ ]]; then
-        printf -- '- /%s/\0' "$q" >> "$work/rules"
+        printf -- '- /%s/\0' "$q" >> "$work/rules" || return 1
         [[ "${f%/}" =~ $rebuild_re ]] && continue
-        { (cd "$src" && find "$p" "${prune[@]}" -prune -o -type f ! -name .DS_Store ! -name '*.iso' -size -1025k -print0) || true; } >> "$work/ignored"
+        { (cd "$src" && find "$p" "${prune[@]}" -prune -o -type f ! -name .DS_Store ! -name '*.iso' -size -1025k -print0) || true; } >> "$work/ignoredd" || return 1
         continue
       fi
-      printf -- '- /%s\0' "$q" >> "$work/rules"
+      printf -- '- /%s\0' "$q" >> "$work/rules" || return 1
       [[ -f "$src$p" ]] || continue
       sz=$(stat -f %z "$src$p" 2>/dev/null) || continue
-      (( sz <= 1048576 )) && printf '%s\0' "$p" >> "$work/ignored"
+      if (( sz <= 1048576 )); then printf '%s\0' "$p" >> "$work/ignored" || return 1; fi
     done < <("${DEV_TREE_GIT[@]}" -C "$src$r" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null || true)
   done < "$work/repos"
+  return 0
 }
 
 # dev_tree_in_named <path> <named-list>: true if <path> or a directory above it is listed.

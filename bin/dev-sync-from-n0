@@ -15,7 +15,8 @@
 #     Work done on the laptop goes back the way git does it: commit, push, and n0's own
 #     dev-pull picks it up within 20 minutes.
 #   - private files: what git does not hold (OpenTofu state, tfvars, .env, keys, gitignored
-#     config), the set lib/dev-tree.sh picks for the iCloud archive minus tracked files, by
+#     config), the set lib/dev-tree.sh picks for the iCloud archive minus tracked files and minus
+#     the contents of gitignored directories (those are archived only, never synced), by
 #     rsync with --update: a file newer on this side is never overwritten, it is reported
 #     instead. bin/dev-push-to-n0 carries such files back to n0 (by hand, when home from a trip).
 #     Two local OpenTofu states are the hazard: apply from one machine at a time.
@@ -104,12 +105,24 @@ if ! ln -s "$$" "$lock" 2>/dev/null; then
   if [[ -n "$pid" ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q dev-sync-from-n0; then
     say "another run (pid $pid) is active; skipped"; exit 0
   fi
-  rm -f "$lock"
+  # Remove the stale lock only if it still names the pid read above: another run that took it
+  # over in the meantime keeps it, and this run finds the lock taken and skips.
+  [[ "$(readlink "$lock" 2>/dev/null || true)" == "$pid" ]] && rm -f "$lock"
   ln -s "$$" "$lock" 2>/dev/null || { say "another run took the lock; skipped"; exit 0; }
 fi
-rm -rf "$state/lock"   # the old mkdir lock
+# The trap releases the lock only while this run owns it.
+trap '[[ "$(readlink "$lock" 2>/dev/null || true)" == "$$" ]] && rm -f "$lock"' EXIT
+# The mkdir lock of the previous version: a run of that version still going (a long first
+# clone) keeps it, and this run skips.
+if [[ -d "$state/lock" ]]; then
+  pid=$(cat "$state/lock/pid" 2>/dev/null || true)
+  if [[ -n "$pid" ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q dev-sync-from-n0; then
+    say "a run of the previous version (pid $pid) is active; skipped"; exit 0
+  fi
+  rm -rf "$state/lock"
+fi
 work=$(mktemp -d)
-trap 'rm -rf "$work"; rm -f "$lock"' EXIT
+trap 'rm -rf "$work"; [[ "$(readlink "$lock" 2>/dev/null || true)" == "$$" ]] && rm -f "$lock"' EXIT
 
 if ! "${ssh_n0[@]}" true 2>/dev/null; then
   say "n0 unreachable; skipped"
