@@ -4,6 +4,7 @@ tap "knative/client"
 tap "broots144/tap"
 
 # CLI tools
+brew "caddy"
 brew "cargo-llvm-cov"
 brew "lightpanda-io/browser/lightpanda"
 brew "mosh"
