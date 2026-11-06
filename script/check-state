@@ -2,7 +2,8 @@
 #
 # STATE.md guard (repo-state pattern, D-008). Fails when the commits in <base>..HEAD change
 # code without changing STATE.md. Docs-only changes pass. Escape hatch: every commit subject
-# in the range starts with chore:, deps: or brew: (the unattended Brewfile commits).
+# in the range starts with chore:, deps: or brew: (the unattended Brewfile commits). Merge
+# commits are skipped: on a PR, HEAD is GitHub's synthetic "Merge X into Y" commit.
 #
 #   script/check-state <base-ref>    check <base>..HEAD
 #   script/check-state --self-test   run against a throwaway repo
@@ -23,7 +24,7 @@ check() {  # <base>
       echo "Update STATE.md, or use a chore:/deps:/brew: commit for changes that do not alter state." >&2
       return 1 ;;
     esac
-  done < <(git log --format=%s "$base"..HEAD)
+  done < <(git log --no-merges --format=%s "$base"..HEAD)
   echo "state-guard: exempt commits only"
 }
 
@@ -41,6 +42,9 @@ self_test() {
   c README.md "docs";                       expect pass "docs only"
   c x.sh "brew: add jq";                    expect pass "brew escape hatch"
   c x.sh "chore: tidy"; c x.sh "fix: y";    expect fail "mixed exempt and code"
+  pr() { git checkout -q -b pr; c x.sh "$1"; git checkout -q -; git merge -q --no-ff -m "Merge pr into base" pr; git branch -q -D pr; }
+  pr "deps: bump";                          expect pass "exempt commit under PR merge commit"
+  pr "fix: y";                              expect fail "code commit under PR merge commit"
   (( fail == 0 )) && echo "ok check-state"
   return "$fail"
 }

@@ -37,6 +37,9 @@ Last updated: 2026-11-06 by Claude (repo-state retrofit): state files, justfile 
   (0f385fb); SSH sessions use the desktop ssh-agent.
 - Tests: `script/test` runs 4 regression tests (`brew-sync-push`, `dev-icloud-backup`, `dev-pull`,
   `untrusted-input`); all pass on n0 2026-11-06.
+- `state-guard.yml` uses `actions/checkout` v7.0.1, SHA pinned (PR #9, 2026-11-06).
+- `script/check-state` skips merge commits (`git log --no-merges`), so the chore:/deps:/brew:
+  exemption now works on PRs, where HEAD is GitHub's synthetic merge commit (PR #9, self-tested).
 - No CI existed before this retrofit; `.github/workflows/state-guard.yml` now checks PRs only, so the
   unattended `brew:` pushes to `master` are not gated.
 
