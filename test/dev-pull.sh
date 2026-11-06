@@ -61,5 +61,43 @@ list=$(dev_tree_private_files "$HOME/dev/" "$t/w" | tr '\0' '\n')
 ok grep -qx 'edits/secrets.local' <<<"$list"
 ok bash -c '! grep -q "x.enc.yaml" <<<"$1"' _ "$list"
 
+# WIP snapshot (own repos only; DEV_PULL_OWN_RE marks the local upstream as own, a stub stands in
+# for gitleaks): files inside a secret-named directory stay out of the pushed commit.
+setup wipt; git -C "$HOME/dev/wipt" pull -q
+printf 'b\n' > "$HOME/dev/wipt/README"
+mkdir -p "$HOME/dev/wipt/secrets" "$HOME/dev/wipt/credentials"
+printf 'plain\n' > "$HOME/dev/wipt/secrets/plain.yaml"; printf 'k\n' > "$HOME/dev/wipt/credentials/a"
+printf 'n\n' > "$HOME/dev/wipt/notes.txt"
+printf '#!/bin/sh\nexit 0\n' > "$t/gitleaks-ok"; chmod +x "$t/gitleaks-ok"
+DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS="$t/gitleaks-ok" "$here/bin/dev-pull" >/dev/null 2>&1 || true
+wref=$(git -C "$t/up/wipt" for-each-ref --format='%(refname)' 'refs/wip/*' | head -1)
+ok [ -n "$wref" ]
+snap=$(git -C "$t/up/wipt" ls-tree -r --name-only "${wref:-HEAD}")
+ok grep -qx notes.txt <<<"$snap"
+ok bash -c '! grep -q "^secrets/plain.yaml$\|^credentials/" <<<"$1"' _ "$snap"
+
+# No gitleaks: the snapshot is withheld, not pushed unscanned.
+git -C "$t/up/wipt" update-ref -d "${wref:-refs/wip/none}" 2>/dev/null || true
+rm -f "$HOME/.local/state/dev-pull/wip/wipt"; printf 'n2\n' >> "$HOME/dev/wipt/notes.txt"
+out=$(DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS=no-such-gitleaks "$here/bin/dev-pull" 2>&1 || true)
+ok grep -q 'snapshot withheld, gitleaks not installed: wipt' <<<"$out"
+ok [ -z "$(git -C "$t/up/wipt" for-each-ref 'refs/wip/*')" ]
+
+# Clean again: the snapshot ref is deleted, and the local record goes only once it is.
+wrun() { DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS="$t/gitleaks-ok" "$here/bin/dev-pull" 2>&1 || true; }
+rec="$HOME/.local/state/dev-pull/wip/wipt"
+wrun >/dev/null; ok [ -s "$rec" ]
+git -C "$HOME/dev/wipt" checkout -q -- README; rm -rf "$HOME/dev/wipt/notes.txt" "$HOME/dev/wipt/credentials" "$HOME/dev/wipt/secrets/plain.yaml"
+printf '#!/bin/sh\nexit 1\n' > "$t/up/wipt/.git/hooks/pre-receive"; chmod +x "$t/up/wipt/.git/hooks/pre-receive"
+out=$(wrun)
+ok [ -s "$rec" ]; ok grep -q 'snapshot delete failed, retried next run: wipt' <<<"$out"
+rm "$t/up/wipt/.git/hooks/pre-receive"
+wrun >/dev/null
+ok [ ! -e "$rec" ]; ok [ -z "$(git -C "$t/up/wipt" for-each-ref 'refs/wip/*')" ]
+# A ref already gone from origin counts as deleted.
+printf 'n3\n' > "$HOME/dev/wipt/notes.txt"; wrun >/dev/null; ok [ -s "$rec" ]
+rm "$HOME/dev/wipt/notes.txt"; git -C "$t/up/wipt" for-each-ref --format='%(refname)' 'refs/wip/*' | xargs -n1 git -C "$t/up/wipt" update-ref -d
+wrun >/dev/null; ok [ ! -e "$rec" ]
+
 (( fail == 0 )) && echo "dev-pull: ok"
 exit "$fail"

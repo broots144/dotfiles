@@ -6,7 +6,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
-export HOME="$t/home"
+export HOME="$t/home" ZSH="$here"
 icloud="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
 keys="$HOME/.config/sops/age/keys.txt"
 mkdir -p "$icloud" "$HOME/.config/sops/age" "$HOME/dev/app/credentials" "$HOME/dev/other"
@@ -31,7 +31,7 @@ root="$(echo "$icloud"/Backups/*)"
 listed="$(age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -tf -)"
 
 fail=0
-mkdir "$t/x"; age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -xf - -C "$t/x"
+mkdir "$t/x"; age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -xzf - -C "$t/x"   # the documented restore
 for f in "${secret[@]}"; do
   [[ -e "$root/dev/app/$f" ]] && { echo "FAIL: $f mirrored in plaintext"; fail=1; }
   [[ -f "$t/x/app/$f" ]] || { echo "FAIL: $f missing from encrypted archive"; fail=1; }
@@ -53,6 +53,79 @@ mv "$HOME/dev" "$t/dev.away"; mkdir "$HOME/dev"
 "$here/bin/dev-icloud-backup" >/dev/null 2>&1 && { echo "FAIL: empty source accepted"; fail=1; }
 [[ -e "$root/dev/app/README.md" ]] || { echo "FAIL: empty source wiped the mirror"; fail=1; }
 [[ "$(shasum "$root/dev-secrets.tar.age")" == "$before" ]] || { echo "FAIL: empty source replaced the archive"; fail=1; }
+
+# No age key: reported as exit 3 with LAST_RUN.json, the mirror still made. No ~/dev: exit 6.
+rm -rf "${HOME:?}/dev"; mv "$t/dev.away" "$HOME/dev"; mv "$keys" "$t/keys.away"
+"$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
+[[ $rc == 3 ]] || { echo "FAIL: no age key exited $rc, want 3"; fail=1; }
+grep -q '"exit":3' "$root/LAST_RUN.json" || { echo "FAIL: no age key, LAST_RUN.json not written"; fail=1; }
+mv "$t/keys.away" "$keys"; mv "$HOME/dev" "$t/dev.away"
+"$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
+[[ $rc == 6 ]] || { echo "FAIL: missing ~/dev exited $rc, want 6"; fail=1; }
+grep -q '"exit":6' "$root/LAST_RUN.json" || { echo "FAIL: missing ~/dev, LAST_RUN.json not written"; fail=1; }
+mv "$t/dev.away" "$HOME/dev"
+
+# A write into iCloud that fails (an old .refs file the provider refuses, simulated by a
+# directory in its place) must not end the run: bundles, mirror and LAST_RUN.json still done.
+rm -rf "${HOME:?}/.local/state/dev-icloud-backup"; rm -f "$root/git/app.refs"; mkdir -p "$root/git/app.refs"; touch "$root/git/app.refs/x"
+g commit -q --allow-empty -m more; echo y > "$HOME/dev/other/new.txt"
+out=$("$here/bin/dev-icloud-backup" 2>&1) && rc=0 || rc=$?
+[[ $rc == 0 ]] || { echo "FAIL: blocked .refs file in iCloud: exit $rc ($out)"; fail=1; }
+grep -q 'dev-icloud-backup exit=0' <<<"$out" || { echo "FAIL: no exit line logged"; fail=1; }
+[[ -e "$root/dev/other/new.txt" ]] || { echo "FAIL: mirror skipped after a failed iCloud write"; fail=1; }
+grep -q '"exit":0' "$root/LAST_RUN.json" || { echo "FAIL: LAST_RUN.json not updated"; fail=1; }
+[[ -s "$HOME/.local/state/dev-icloud-backup/git/app.refs" ]] || { echo "FAIL: refs cache not kept locally"; fail=1; }
+
+# One unreadable directory must not end the run before anything is archived or mirrored.
+mkdir -p "$HOME/dev/other/locked"; chmod 000 "$HOME/dev/other/locked"; echo z > "$HOME/dev/other/new2.txt"
+"$here/bin/dev-icloud-backup" >/dev/null 2>&1 && rc=0 || rc=$?
+chmod 755 "$HOME/dev/other/locked"; rmdir "$HOME/dev/other/locked"
+chmod 755 "$root/dev/other/locked" 2>/dev/null || true   # rsync copied the mode into the mirror
+[[ -e "$root/dev/other/new2.txt" ]] || { echo "FAIL: unreadable directory stopped the mirror (exit $rc)"; fail=1; }
+grep -q '"finished_at"' "$root/LAST_RUN.json" && [[ "$root/LAST_RUN.json" -nt "$HOME/dev/other/new2.txt" ]] \
+  || { echo "FAIL: unreadable directory, LAST_RUN.json not written"; fail=1; }
+
+# Gitignored directories are default-deny too (TV pairing tokens in tv-fleet/private/ were
+# mirrored in plaintext, 2026-11-06): nothing under one reaches the mirror; its small files
+# are archived; rebuildable output and big ignored files are only kept out of the mirror.
+p="$HOME/dev/app"
+mkdir -p "$p/private/tokens" "$p/target/debug" "$p/private/node_modules/m"
+printf 'tok\n' > "$p/private/tokens/living-room.token"; printf 'pin\n' > "$p/private/pins.toml"
+printf 'b\n' > "$p/target/debug/out.bin"; printf 'm\n' > "$p/private/node_modules/m/i.js"
+dd if=/dev/zero of="$p/private/big.db" bs=1024 count=1100 2>/dev/null
+dd if=/dev/zero of="$p/huge.sqlite" bs=1024 count=1100 2>/dev/null
+printf 'private-notes.txt\nprivate/\ntarget/\nhuge.sqlite\n' > "$p/.gitignore"
+printf 'tv\n' > "$p/remote.token"     # a token file that is not ignored: secret name
+out=$("$here/bin/dev-icloud-backup" 2>&1) || { echo "FAIL: backup with ignored dirs exited non-zero: $out"; fail=1; }
+for f in private private/tokens/living-room.token private/pins.toml private/big.db target huge.sqlite remote.token; do
+  [[ -e "$root/dev/app/$f" ]] && { echo "FAIL: ignored $f mirrored in plaintext"; fail=1; }
+done
+listed="$(age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -tf -)"
+for f in app/private/tokens/living-room.token app/private/pins.toml app/remote.token; do
+  grep -qxF "$f" <<<"$listed" || { echo "FAIL: $f missing from encrypted archive"; fail=1; }
+done
+for f in app/private/big.db app/target/debug/out.bin app/private/node_modules/m/i.js app/huge.sqlite; do
+  grep -qxF "$f" <<<"$listed" && { echo "FAIL: $f should not be archived"; fail=1; }
+done
+
+# The MacBook sync carries gitignored files outside ignored directories, as before; the files
+# inside ignored directories are archived only (scratch/, logs/, private/ stay on their machine).
+. "$here/lib/dev-tree.sh"
+mkdir "$t/w"; dev_tree_lists "$HOME/dev/" "$t/w"
+synced="$(dev_tree_private_files "$HOME/dev/" "$t/w" | tr '\0' '\n')"
+grep -qxF app/private-notes.txt <<<"$synced" || { echo "FAIL: ignored file outside an ignored dir not in the sync manifest"; fail=1; }
+grep -qxF app/private/pins.toml <<<"$synced" && { echo "FAIL: file inside an ignored dir in the sync manifest"; fail=1; }
+# A failed list write is a failed scan (status 6 in the backup), not a silent partial one.
+rm -f "$t/w/rules"; mkdir "$t/w/rules"   # the rules list cannot be written
+dev_tree_lists "$HOME/dev/" "$t/w" 2>/dev/null && { echo "FAIL: unwritable rules list, dev_tree_lists returned 0"; fail=1; }
+
+# An old iCloud .refs that matches is moved into the local cache once: no rebuild, and the
+# iCloud copy is gone so later nights never read it.
+c="$HOME/.local/state/dev-icloud-backup/git"
+rm -rf "$root/git/app.refs"; mv "$c/app.refs" "$root/git/app.refs"
+out=$("$here/bin/dev-icloud-backup" 2>&1) || true
+grep -q 'rebuilt 0 git bundle' <<<"$out" || { echo "FAIL: matching iCloud .refs rebuilt the bundle: $out"; fail=1; }
+[[ -s "$c/app.refs" && ! -e "$root/git/app.refs" ]] || { echo "FAIL: iCloud .refs not moved into the local cache"; fail=1; }
 
 (( fail == 0 )) && echo "ok dev-icloud-backup"
 exit "$fail"

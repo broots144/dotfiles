@@ -2,6 +2,7 @@
 
 One line per lesson, newest first.
 
+- 2026-11-06: The iCloud mirror skipped gitignored directories entirely, so their contents (TV tokens, private/ dirs) went to iCloud in plaintext; and under `set -e` one failed probe or iCloud write ended the backup silently. Rules: default-deny means every gitignored path gets an exclude rule, whatever its size or type; a backup script's probes and writes into iCloud must fail into a status code, never into an abort.
 - 2026-11-06: The nightly iCloud backup on n0 died on "Resource deadlock avoided" writing a small `.refs` file into iCloud Drive. The iCloud file provider can refuse a write transiently; any write into iCloud Drive needs to tolerate a retry, and one failed file must not abort the whole run. (Open in STATE.md.)
 - 2026-10-28: Bonjour renamed n0's LocalHostName to n0-2 on a name conflict and the host-gated LaunchAgents stopped matching. Rule: host identity is `HostName`, else `LocalHostName`.
 - 2026-10-28: dev-icloud-backup broke under launchd because macOS `/bin/bash` is 3.2, where an empty `"${arr[@]}"` under `set -u` is an unbound variable. Rule: launchd scripts target bash 3.2.

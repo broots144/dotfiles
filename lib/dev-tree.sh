@@ -29,8 +29,26 @@ DEV_TREE_SECRET_NAMES=(
   'token*.json' 'token*.pickle' 'client_secret*.json' 'credentials*' '*secrets*'
   .git-credentials .netrc .npmrc .pypirc .pgpass .htpasswd '.vault_pass*' '*vault-pass*'
   '*.local.zsh' '*.local.symlink' 'gitconfig.local*'
-  settings.local.json .mcp.json '*.age' '*.gpg' '*.asc'
+  settings.local.json .mcp.json '*.age' '*.gpg' '*.asc' '*.token'
 )
+# Gitignored directories that are rebuildable output: kept out of the plaintext mirror like
+# every gitignored directory, but not copied into the encrypted archive (tens of thousands of
+# files). Only consulted for directories git reports as ignored.
+DEV_TREE_REBUILDABLE=(
+  target build .build .wrangler .pio .swiftpm cdk.out '*.egg-info' test-results .hypothesis
+  .func .husky lambda_build .gradle .tox .nox .turbo .svelte-kit .parcel-cache .nuxt coverage
+)
+
+# dev_tree_skip_re <name>...: the names (DEV_TREE_EXCLUDES syntax) as one ERE over relative
+# paths: '/x/' at the start only, 'x/' and plain names as any path component.
+dev_tree_skip_re() {
+  local e re=""
+  for e in "$@"; do
+    case "$e" in /*) e="${e#/}"; e="${e%/}"; e="^${e//./\\.}" ;; *) e="${e%/}"; e="(^|/)${e//./\\.}" ;; esac
+    re+="${re:+|}${e//\*/[^/]*}(/|$)"
+  done
+  printf %s "$re"
+}
 
 # 'ab' -> '[aA][bB]': rsync patterns are case-sensitive.
 dev_tree_nocase() {
@@ -57,7 +75,8 @@ dev_tree_repos() {
       */)  bulk+=(-o -name "${e%/}") ;;
     esac
   done
-  (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) | dev_tree_strip > "$out"
+  # find exits 1 on one unreadable or vanished entry; keep what it listed (pipefail callers).
+  { (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) || true; } | dev_tree_strip > "$out"
 }
 
 # dev_tree_private_files <src/> <workdir>: NUL-separated paths of what git does not carry:
@@ -66,13 +85,10 @@ dev_tree_repos() {
 # MacBook sync in both directions (bin/dev-sync-from-n0 --manifest on n0, bin/dev-push-to-n0
 # on the laptop), so the two directions carry the same set.
 dev_tree_private_files() {
-  local src="$1" work="$2" g r p e skip=""
+  local src="$1" work="$2" g r p skip
   # The bulk/junk names of DEV_TREE_EXCLUDES as one regex: git lists a cache directory's own
   # .gitignore and the odd .DS_Store as ignored files, and neither is worth carrying.
-  for e in "${DEV_TREE_EXCLUDES[@]}"; do
-    e="${e#/}"; e="${e%/}"; e="${e//./\\.}"; e="${e//\*/.*}"
-    skip+="${skip:+|}(^|/)$e(/|$)"
-  done
+  skip=$(dev_tree_skip_re "${DEV_TREE_EXCLUDES[@]}")
   (cd "$src" && cat "$work/named" "$work/ignored" | sort -zu | while IFS= read -r -d '' p; do
     if [[ -d "$p" && ! -L "$p" ]]; then find "$p" -name .git -prune -o -type f -print; else printf '%s\n' "$p"; fi
   done) | grep -vE "$skip" | sort -u > "$work/all"
@@ -94,13 +110,20 @@ dev_tree_private_files() {
 # dev_tree_lists <src/> <workdir>: writes NUL-separated lists, relative to <src>, into <workdir>:
 #   repos    every .git directory (nested ones too), bulk folders pruned
 #   named    files and directories with a secret-bearing name (bulk folders and .git pruned)
-#   ignored  gitignored regular files outside ignored directories, up to 1 MiB
+#   ignored  gitignored regular files up to 1 MiB that sit outside a gitignored directory
+#   ignoredd regular files up to 1 MiB inside gitignored directories (rebuildable ones in
+#            DEV_TREE_REBUILDABLE and bulk folders left out). Archive only: the MacBook sync
+#            (dev_tree_private_files) does not read it, so scratch/, logs/, cache/ and private/
+#            dirs stay on the machine that made them and are not copied both ways every 20 min.
 #   gitcfg   each repo's .git/config
-#   rules    rsync exclude rules ('- /path') for everything in `ignored`
+#   rules    rsync exclude rules ('- /path') for every gitignored file and directory, of any
+#            size: default-deny, nothing gitignored reaches the plaintext mirror
 # Also fills DEV_TREE_RSYNC_EXCLUDES with --exclude args for .git, the bulk folders and the
 # secret names (case-insensitive).
+# Returns non-zero when a list could not be written (the callers refuse to mirror on that);
+# find and git errors on single entries are tolerated, the scan keeps what it could list.
 dev_tree_lists() {
-  local src="$1" work="$2" e g r f p q
+  local src="$1" work="$2" e g r f p q sz bulk_re rebuild_re prune=()
   DEV_TREE_RSYNC_EXCLUDES=(--exclude .git/)
   for e in "${DEV_TREE_EXCLUDES[@]}"; do DEV_TREE_RSYNC_EXCLUDES+=(--exclude "$e"); done
   for e in "${DEV_TREE_SECRET_NAMES[@]}"; do DEV_TREE_RSYNC_EXCLUDES+=(--exclude "$(dev_tree_nocase "$e")"); done
@@ -117,23 +140,52 @@ dev_tree_lists() {
   named=( \( "${named[@]:1}" \) )
 
   # Lists are NUL-separated so any legal file name survives.
-  (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) | dev_tree_strip > "$work/named"
-  dev_tree_repos "$src" "$work/repos"
+  { (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) || true; } | dev_tree_strip > "$work/named" || return 1
+  dev_tree_repos "$src" "$work/repos" || return 1
 
-  : > "$work/ignored"; : > "$work/gitcfg"; : > "$work/rules"
+  # Inside an ignored directory: skip .git, bulk folders and rebuildable output.
+  bulk_re=$(dev_tree_skip_re "${DEV_TREE_EXCLUDES[@]}")
+  rebuild_re=$(dev_tree_skip_re "${DEV_TREE_REBUILDABLE[@]}")
+  for e in .git "${DEV_TREE_EXCLUDES[@]}" "${DEV_TREE_REBUILDABLE[@]}"; do
+    case "$e" in /*|'*.iso'|.DS_Store) ;; *) prune+=(-o -name "${e%/}") ;; esac
+  done
+  prune=( \( "${prune[@]:1}" \) )
+
+  : > "$work/ignored" && : > "$work/ignoredd" && : > "$work/gitcfg" && : > "$work/rules" || return 1
   while IFS= read -r -d '' g; do
     r="${g%/.git}"
-    [[ -f "$src$g/config" ]] && printf '%s\0' "$g/config" >> "$work/gitcfg"
+    if [[ -f "$src$g/config" ]]; then printf '%s\0' "$g/config" >> "$work/gitcfg" || return 1; fi
     while IFS= read -r -d '' f; do
-      [[ "$f" == */ ]] && continue
-      p="$r/$f"
-      [[ -f "$src$p" && ! -L "$src$p" ]] || continue
-      (( $(stat -f %z "$src$p") <= 1048576 )) || continue
-      printf '%s\0' "$p" >> "$work/ignored"
+      p="$r/${f%/}"
+      [[ -e "$src$p" && ! -L "$src$p" ]] || continue
+      # Bulk folders are excluded by DEV_TREE_RSYNC_EXCLUDES already; a secret-named path or
+      # one under a secret-named directory is archived whole through `named`.
+      [[ "$p" =~ $bulk_re ]] && continue
+      dev_tree_in_named "$p" "$work/named" && continue
       q="${p//\*/\\*}"; q="${q//\?/\\?}"; q="${q//\[/\\[}"
-      printf -- '- /%s\0' "$q" >> "$work/rules"
+      if [[ "$f" == */ ]]; then
+        printf -- '- /%s/\0' "$q" >> "$work/rules" || return 1
+        [[ "${f%/}" =~ $rebuild_re ]] && continue
+        { (cd "$src" && find "$p" "${prune[@]}" -prune -o -type f ! -name .DS_Store ! -name '*.iso' -size -1025k -print0) || true; } >> "$work/ignoredd" || return 1
+        continue
+      fi
+      printf -- '- /%s\0' "$q" >> "$work/rules" || return 1
+      [[ -f "$src$p" ]] || continue
+      sz=$(stat -f %z "$src$p" 2>/dev/null) || continue
+      if (( sz <= 1048576 )); then printf '%s\0' "$p" >> "$work/ignored" || return 1; fi
     done < <("${DEV_TREE_GIT[@]}" -C "$src$r" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null || true)
   done < "$work/repos"
+  return 0
+}
+
+# dev_tree_in_named <path> <named-list>: true if <path> or a directory above it is listed.
+dev_tree_in_named() {
+  local x="$1"
+  while :; do
+    grep -qzxF -- "$x" "$2" && return 0
+    [[ "$x" == */* ]] || return 1
+    x="${x%/*}"
+  done
 }
 
 dev_tree_strip() { local p; while IFS= read -r -d '' p; do printf '%s\0' "${p#./}"; done; }

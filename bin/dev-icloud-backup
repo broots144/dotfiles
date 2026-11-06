@@ -15,13 +15,16 @@
 # to the age public key in ~/.config/sops/age/keys.txt, whose private half is not in iCloud:
 #   - dev-secrets.tar.age: files with a secret-bearing name (OpenTofu state and tfvars, .env,
 #     OAuth tokens, private keys, kubeconfigs, agent local settings, ...), every gitignored
-#     file up to 1 MiB that sits outside an ignored directory (default-deny for secret names
-#     the list misses), and each repo's .git/config. Dated copies are kept in secrets-history/.
+#     file up to 1 MiB, also inside gitignored directories (default-deny for secret names the
+#     list misses; rebuildable output such as target/ is left out), and each repo's
+#     .git/config. Gzipped inside the age stream (archives before 2026-11-06 are plain tar). Dated copies are kept in
+#     secrets-history/. Nothing gitignored, of any size, is in the plaintext mirror.
 #   - git/<repo>.bundle.age: every repo's history (all branches, tags, stash), rebuilt only
 #     when its refs change. The plaintext mirror never holds a .git directory, because a
 #     secret that was ever staged or committed lives on in the object store.
 # Restore into a staging directory, then compare before copying anything back over ~/dev:
-#   mkdir /tmp/restore && age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xf - -C /tmp/restore
+#   mkdir /tmp/restore && age -d -i ~/.config/sops/age/keys.txt dev-secrets.tar.age | tar -xzf - -C /tmp/restore
+#     (drop the z for an archive from before 2026-11-06; macOS bsdtar detects either with -xf)
 #   age -d -i ~/.config/sops/age/keys.txt git/<repo>.bundle.age > /tmp/r.bundle && git clone /tmp/r.bundle <dir>
 #
 # Run by macos/com.broots.dev-icloud-backup.plist; by hand: dev-icloud-backup [-n]
@@ -45,18 +48,23 @@ dry=()
 
 start=$(date +%s)
 status=0
+# Writes into iCloud Drive can fail (EDEADLK on an evicted file, 2026-11-06), so the status
+# record goes via a temp file and never stops the exit line from being logged.
 finish() {
   if [[ ${#dry[@]} -eq 0 ]]; then
-    printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
-      "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/LAST_RUN.json"
+    { printf '{"finished_at":"%s","seconds":%d,"exit":%d,"source":"%s"}\n' \
+        "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" "$status" "$src" > "$root/.LAST_RUN.json.tmp" \
+      && mv -f "$root/.LAST_RUN.json.tmp" "$root/LAST_RUN.json"; } \
+      || echo "$(date -u +%FT%TZ) could not write $root/LAST_RUN.json" >&2
   fi
   echo "$(date -u +%FT%TZ) dev-icloud-backup exit=$status in $(( $(date +%s) - start ))s"
   exit "$status"
 }
 
 # An emptied or unmounted ~/dev must not be mirrored (with --delete) over a good backup.
-n_src=$(find "$src" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
-n_dst=$(find "$dst" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+# The probes tolerate a missing or unreadable directory (pipefail would end the run silently).
+n_src=$( { find "$src" -mindepth 1 -maxdepth 1 2>/dev/null || true; } | wc -l | tr -d ' ')
+n_dst=$( { find "$dst" -mindepth 1 -maxdepth 1 2>/dev/null || true; } | wc -l | tr -d ' ')
 if (( n_src == 0 || n_src * 2 < n_dst )); then
   echo "$(date -u +%FT%TZ) $src has $n_src entries, mirror has $n_dst; refusing to mirror or archive" >&2
   status=6
@@ -68,12 +76,17 @@ fi
 . "${ZSH:-$HOME/.dotfiles}/lib/dev-tree.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-dev_tree_lists "$src" "$work"
+if ! dev_tree_lists "$src" "$work"; then
+  echo "$(date -u +%FT%TZ) scan of $src failed; refusing to mirror or archive" >&2
+  status=6
+  finish
+fi
 args=("${DEV_TREE_RSYNC_EXCLUDES[@]}")
 git_safe=("${DEV_TREE_GIT[@]}")
 
 keys="$HOME/.config/sops/age/keys.txt"
-recipient=$(sed -n 's/^# public key: //p' "$keys" 2>/dev/null | head -1)
+cache="$HOME/.local/state/dev-icloud-backup/git"
+recipient=$( { sed -n 's/^# public key: //p' "$keys" 2>/dev/null || true; } | head -1)
 age=$(command -v age || echo /opt/homebrew/bin/age)
 
 if [[ ${#dry[@]} -gt 0 ]]; then
@@ -83,14 +96,14 @@ elif [[ -z "$recipient" ]]; then
   status=3
 else
   # The encrypted archive first, so a file newly kept out of the mirror is never in neither copy.
-  cat "$work/named" "$work/ignored" "$work/gitcfg" | sort -zu > "$work/list"
+  cat "$work/named" "$work/ignored" "$work/ignoredd" "$work/gitcfg" | sort -zu > "$work/list"
   n=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
   tmp="$root/.dev-secrets.tar.age.tmp"; hist="$root/secrets-history"
   mkdir -p "$hist"
   if (( n == 0 )); then
     echo "$(date -u +%FT%TZ) no secret files found; keeping the previous archive" >&2
     status=4
-  elif tar --null -cf - -C "$src" -T "$work/list" | "$age" -r "$recipient" -o "$tmp" \
+  elif tar --null -czf - -C "$src" -T "$work/list" | "$age" -r "$recipient" -o "$tmp" \
       && mv -f "$tmp" "$root/dev-secrets.tar.age" \
       && cp -f "$root/dev-secrets.tar.age" "$hist/dev-secrets-$(date +%F).tar.age"; then
     echo "$(date -u +%FT%TZ) archived $n secret files (encrypted)"
@@ -102,19 +115,35 @@ else
     status=4
   fi
 
-  # Git history as encrypted bundles, rebuilt only when a repo's refs changed.
-  mkdir -p "$root/git"
+  # Git history as encrypted bundles, rebuilt only when a repo's refs changed. The refs cache
+  # lives on local disk: an evicted .refs file in iCloud Drive failed to open (EDEADLK) and
+  # ended the run. A repo with no local entry yet takes the old iCloud one once (copied here,
+  # then removed from iCloud), so the move rebuilds nothing and iCloud .refs are not read again.
+  mkdir -p "$root/git" "$cache"
   built=0
   while IFS= read -r -d '' g; do
     r="${g%/.git}"; name="${r//\//__}"
     refs=$("${git_safe[@]}" -C "$src$r" for-each-ref --format='%(objectname) %(refname)' 2>/dev/null || true)
     [[ -n "$refs" ]] || continue
     sum=$(printf '%s\n' "$refs" | shasum -a 256 | cut -d' ' -f1)
-    [[ -f "$root/git/$name.bundle.age" && "$(cat "$root/git/$name.refs" 2>/dev/null)" == "$sum" ]] && continue
+    refs_f="$cache/$name.refs"
+    cached=$(cat "$refs_f" 2>/dev/null || true)
+    if [[ -z "$cached" && -e "$root/git/$name.refs" ]]; then
+      cached=$(cat "$root/git/$name.refs" 2>/dev/null || true)
+      if [[ -n "$cached" ]] && printf '%s\n' "$cached" > "$refs_f.tmp" 2>/dev/null && mv -f "$refs_f.tmp" "$refs_f"; then
+        rm -f "$root/git/$name.refs" 2>/dev/null || true
+      fi
+    fi
+    [[ -f "$root/git/$name.bundle.age" && "$cached" == "$sum" ]] && continue
     if "${git_safe[@]}" -C "$src$r" bundle create -q "$work/b.bundle" --all 2>/dev/null \
         && "$age" -r "$recipient" -o "$root/git/.$name.tmp" "$work/b.bundle" \
         && mv -f "$root/git/.$name.tmp" "$root/git/$name.bundle.age"; then
-      printf '%s\n' "$sum" > "$root/git/$name.refs"
+      if printf '%s\n' "$sum" > "$refs_f.tmp" && mv -f "$refs_f.tmp" "$refs_f"; then
+        rm -f "$root/git/$name.refs" 2>/dev/null || true
+      else
+        echo "$(date -u +%FT%TZ) could not record refs for $r" >&2
+        [[ $status -eq 0 ]] && status=5
+      fi
       built=$((built + 1))
     else
       rm -f "$root/git/.$name.tmp"

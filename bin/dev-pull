@@ -22,7 +22,8 @@
 #     force-updated when the tree changes, deleted when the checkout is clean again. Left out of
 #     it: ignored files (git's own rule), files with a secret-bearing name (lib/dev-tree.sh,
 #     rsync carries those), untracked files over 1 MiB, and anything gitleaks flags (then the
-#     snapshot is withheld and reported). Never the working tree, index, branches or stash.
+#     snapshot is withheld and reported; it is also withheld when gitleaks is not installed).
+#     Never the working tree, index, branches or stash.
 # Nothing here ever resets, rebases, stashes, or touches a branch.
 #
 # dev-pull [-n] [-q]    -n: fetch and report only, no merge, no snapshot.  -q: summary line only.
@@ -55,14 +56,19 @@ work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 # Snapshot a dirty checkout to refs/wip/$me on origin. Own repos only (the fork of someone
 # else's project has no push rights and its WIP is not ours to publish).
 wip_ref="refs/wip/$me"
-own_repo() { "${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | grep -qE '^(git@github\.com:|https://github\.com/)(broots144|workshop144)/'; }
+# DEV_PULL_OWN_RE and DEV_PULL_GITLEAKS exist for test/dev-pull.sh (local upstreams, stub scanner).
+own_re="${DEV_PULL_OWN_RE:-^(git@github\.com:|https://github\.com/)(broots144|workshop144)/}"
+gitleaks="${DEV_PULL_GITLEAKS:-gitleaks}"
+own_repo() { "${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | grep -qE "$own_re"; }
 wip_snapshot() {  # <repo> <branch>; sets wip_msg
   local r="$1" b="$2" dst="$dev/$1" idx="$work/idx" rec="$state/wip/${1//\//__}" tree last commit ex=() e f n_new n_mod
   rm -f "$idx"
   local g=("${git_q[@]}" -C "$dst")
   export GIT_INDEX_FILE="$idx"
   "${g[@]}" read-tree HEAD || { unset GIT_INDEX_FILE; wip_msg="snapshot failed (read-tree): $r"; return 1; }
-  for e in "${DEV_TREE_SECRET_NAMES[@]}"; do ex+=(":(exclude,icase,glob)**/$e"); done
+  # glob magic: '*' stops at '/', so a secret-named directory needs its own '/**' rule, or the
+  # files inside it (secrets/plain.yaml) go into the snapshot.
+  for e in "${DEV_TREE_SECRET_NAMES[@]}"; do ex+=(":(exclude,icase,glob)**/$e" ":(exclude,icase,glob)**/$e/**"); done
   while IFS= read -r -d '' f; do
     [[ -f "$dst/$f" && ! -L "$dst/$f" ]] || continue
     (( $(stat -f %z "$dst/$f") > 1048576 )) && ex+=(":(exclude)$f")
@@ -76,7 +82,9 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
   n_new=$("${g[@]}" ls-files --others --exclude-standard | wc -l | tr -d ' ')
   commit=$(printf 'wip(%s): %s, %s modified, %s new, %s\n\nSnapshot by dev-pull; not a branch. Secret-named and >1 MiB files left out.\n' \
     "$me" "$b" "$n_mod" "$n_new" "$(date -u +%FT%TZ)" | "${g[@]}" commit-tree "$tree" -p HEAD) || { wip_msg="snapshot failed (commit-tree): $r"; return 1; }
-  if command -v gitleaks >/dev/null && ! gitleaks git --no-banner --exit-code 1 --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
+  # Fail closed: no scanner (fresh laptop, broken upgrade, odd PATH) means no push.
+  command -v "$gitleaks" >/dev/null || { wip_msg="snapshot withheld, gitleaks not installed: $r"; return 1; }
+  if ! "$gitleaks" git --no-banner --exit-code 1 --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
     wip_msg="snapshot withheld, gitleaks finding: $r (gitleaks git --log-opts='$commit^!' $dst)"; return 1
   fi
   if "${g[@]}" push -q --force origin "$commit:$wip_ref" 2>"$work/err"; then
@@ -85,9 +93,14 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
   wip_msg="snapshot push failed: $r ($(grep -m1 . "$work/err"))"; return 1
 }
 wip_clear() {  # <repo>: the checkout is clean again; the snapshot ref says otherwise, so drop it
-  local r="$1" rec="$state/wip/${1//\//__}"
+  local r="$1" rec="$state/wip/${1//\//__}" rc
   [[ -e "$rec" ]] || return 0
-  "${git_q[@]}" -C "$dev/$r" push -q origin ":$wip_ref" 2>/dev/null; rm -f "$rec"
+  if "${git_q[@]}" -C "$dev/$r" push -q origin ":$wip_ref" 2>/dev/null; then rm -f "$rec"; return 0; fi
+  # The record goes only once the ref is gone (ls-remote exit 2: not on origin); otherwise the
+  # next run retries, so a stale snapshot never stays on GitHub with nothing tracking it.
+  "${git_q[@]}" -C "$dev/$r" ls-remote -q --exit-code origin "$wip_ref" >/dev/null 2>&1 && rc=0 || rc=$?
+  if (( rc == 2 )); then rm -f "$rec"; else problems+=("snapshot delete failed, retried next run: $r"); fi
+  return 0
 }
 # Make the other host's snapshots fetchable (`git fetch origin` brings refs/wip/*).
 wip_fetchspec() { local g=("${git_q[@]}" -C "$1"); "${g[@]}" config --get-all remote.origin.fetch | grep -qx '+refs/wip/\*:refs/wip/\*' || "${g[@]}" config --add remote.origin.fetch '+refs/wip/*:refs/wip/*'; }
