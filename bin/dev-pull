@@ -93,9 +93,14 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
   wip_msg="snapshot push failed: $r ($(grep -m1 . "$work/err"))"; return 1
 }
 wip_clear() {  # <repo>: the checkout is clean again; the snapshot ref says otherwise, so drop it
-  local r="$1" rec="$state/wip/${1//\//__}"
+  local r="$1" rec="$state/wip/${1//\//__}" rc
   [[ -e "$rec" ]] || return 0
-  "${git_q[@]}" -C "$dev/$r" push -q origin ":$wip_ref" 2>/dev/null; rm -f "$rec"
+  if "${git_q[@]}" -C "$dev/$r" push -q origin ":$wip_ref" 2>/dev/null; then rm -f "$rec"; return 0; fi
+  # The record goes only once the ref is gone (ls-remote exit 2: not on origin); otherwise the
+  # next run retries, so a stale snapshot never stays on GitHub with nothing tracking it.
+  "${git_q[@]}" -C "$dev/$r" ls-remote -q --exit-code origin "$wip_ref" >/dev/null 2>&1 && rc=0 || rc=$?
+  if (( rc == 2 )); then rm -f "$rec"; else problems+=("snapshot delete failed, retried next run: $r"); fi
+  return 0
 }
 # Make the other host's snapshots fetchable (`git fetch origin` brings refs/wip/*).
 wip_fetchspec() { local g=("${git_q[@]}" -C "$1"); "${g[@]}" config --get-all remote.origin.fetch | grep -qx '+refs/wip/\*:refs/wip/\*' || "${g[@]}" config --add remote.origin.fetch '+refs/wip/*:refs/wip/*'; }

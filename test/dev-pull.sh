@@ -83,5 +83,21 @@ out=$(DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS=no-such-gitleaks "$here/bin/
 ok grep -q 'snapshot withheld, gitleaks not installed: wipt' <<<"$out"
 ok [ -z "$(git -C "$t/up/wipt" for-each-ref 'refs/wip/*')" ]
 
+# Clean again: the snapshot ref is deleted, and the local record goes only once it is.
+wrun() { DEV_PULL_OWN_RE='/up/wipt$' DEV_PULL_GITLEAKS="$t/gitleaks-ok" "$here/bin/dev-pull" 2>&1 || true; }
+rec="$HOME/.local/state/dev-pull/wip/wipt"
+wrun >/dev/null; ok [ -s "$rec" ]
+git -C "$HOME/dev/wipt" checkout -q -- README; rm -rf "$HOME/dev/wipt/notes.txt" "$HOME/dev/wipt/credentials" "$HOME/dev/wipt/secrets/plain.yaml"
+printf '#!/bin/sh\nexit 1\n' > "$t/up/wipt/.git/hooks/pre-receive"; chmod +x "$t/up/wipt/.git/hooks/pre-receive"
+out=$(wrun)
+ok [ -s "$rec" ]; ok grep -q 'snapshot delete failed, retried next run: wipt' <<<"$out"
+rm "$t/up/wipt/.git/hooks/pre-receive"
+wrun >/dev/null
+ok [ ! -e "$rec" ]; ok [ -z "$(git -C "$t/up/wipt" for-each-ref 'refs/wip/*')" ]
+# A ref already gone from origin counts as deleted.
+printf 'n3\n' > "$HOME/dev/wipt/notes.txt"; wrun >/dev/null; ok [ -s "$rec" ]
+rm "$HOME/dev/wipt/notes.txt"; git -C "$t/up/wipt" for-each-ref --format='%(refname)' 'refs/wip/*' | xargs -n1 git -C "$t/up/wipt" update-ref -d
+wrun >/dev/null; ok [ ! -e "$rec" ]
+
 (( fail == 0 )) && echo "dev-pull: ok"
 exit "$fail"
