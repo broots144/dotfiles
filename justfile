@@ -1,5 +1,5 @@
 # Maintained shell scripts (bash/sh). Legacy holman scripts are syntax-checked only.
-maintained := "bin/brew-nightly bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
+maintained := "bin/brew-nightly bin/herdr-server herdr/install.sh script/verify-herdr bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
 
 default: check
 
@@ -69,3 +69,11 @@ verify-phase-6:
     if grep -n $'\xe2\x80\x94\|\xe2\x80\x93' STATE.md ROADMAP.md LESSONS.md docs/DECISIONS.md CLAUDE.md docs/plans/*.md; then echo "dash found"; exit 1; fi
     script/check-state --self-test
     echo "verify-phase-6 ok"
+
+# P8 herdr on n0: pin, Claude integration, server under launchd, socket answering, modes (run on n0)
+verify-phase-8:
+    test/herdr.sh
+    script/verify-herdr
+
+# alias of verify-phase-8 (the task brief called it "phase 1")
+verify-herdr: verify-phase-8
