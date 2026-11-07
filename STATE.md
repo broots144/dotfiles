@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 merged and deployed on n0; grade A).
+Last updated: 2026-11-07 by Claude (security review r3 closed out: PRs #18 to #22 merged and deployed on n0; grade A).
 
 ## Phases
 
@@ -183,8 +183,27 @@ verify-phase-6 ok
 
 ## Security grade
 
-Current grade: **A** (security review 2026-11-07 r2; rubric: A = no open Medium or higher and
+Current grade: **A** (security review 2026-11-07 r3; rubric: A = no open Medium or higher and
 every open Low documented with a reason; A+ also needs no open finding above Informational).
+
+- r3, fixed and deployed on n0 2026-11-07: N1 (Low) a second `remote.origin.url` received the
+  WIP snapshot, and a planted `remote.origin.fetch` could move or prune local branches (PR #18);
+  N6 (Low) `drop_identical` missed files renamed into place (PR #18); N2 (Info) one vanished
+  file discarded the encrypted archive (PR #19); N3 (Info) dev-sync-from-n0 misreported why a
+  fast-forward failed (PR #19); N4 (Low) install-launchd.sh stopped on the bootout/bootstrap
+  race (PR #20); N5 (Info) legacy installers set a missing login shell and piped an unpinned
+  installer into sh (PR #20). Each has a regression test.
+- r3 deploy follow-ups (found by the live check, fixed forward): the mirror rsync exited 23 on
+  an evicted package directory in iCloud (`fstatat: Resource deadlock avoided`); PR #21 and
+  PR #22 remove the nearest evicted ancestor and retry.
+- r3 verified live on n0: dev-pull via `launchctl kickstart` 2026-11-07 17:08Z and the 18:02Z
+  scheduled run exit 0, `0 failed, 0 skipped` (no n0 repo has a second origin url; the
+  single-branch clones birdnet-go, ComfyUI, SwarmUI and frigate keep their narrow refspecs);
+  `macos/install-launchd.sh` run live exit 0 with all three n0 agents loaded;
+  dev-icloud-backup via kickstart 18:15Z exit 0 in 883 s (11,665 files archived, the evicted
+  `ClaudeGlance.xcodeproj` removed from the mirror and rewritten on the retry).
+  dev-sync-from-n0 (N3) runs on the MacBook only; covered by test/dev-sync-from-n0.sh, live on
+  its next run there.
 
 - r2, fixed and deployed on n0 2026-11-07: N1 (Medium) dev-pull ran a submodule's repo-local
   config through status and fetch (PR #16), N2 (Low) the visibility cache let a repo made public
@@ -200,7 +219,7 @@ every open Low documented with a reason; A+ also needs no open finding above Inf
   evicted mirror files, no rsync errors); every exclude rule path, including
   `forks/MeshCore-v1.18/.pio`, `StockDock/.build` and `tv-fleet/private`, is gone from the mirror.
 - Not A+: the open Lows below remain (one is blocked on the operator), and the CI's Homebrew
-  tools are not version-pinned.
+  tools are not version-pinned. No r3 finding is open.
 
 Open Lows, each accepted or blocked:
 
@@ -226,6 +245,11 @@ Open Lows, each accepted or blocked:
 - Accepted (Informational): submodules are not scanned when they are not absorbed (`sub/.git` a directory);
   dev-pull never runs a git command inside one (no recursion, `--ignore-submodules=all`), which
   test/untrusted-input.sh pins.
+- Accepted (Informational): `homebrew/install.sh` pipes Homebrew's own installer
+  (`raw.githubusercontent.com/Homebrew/install/HEAD`) into bash, unpinned. It is Homebrew's
+  documented install path and runs only when brew is missing (a fresh Mac, interactively);
+  test/legacy-installers.sh allows that one file and fails on any other download piped into a
+  shell.
 - Accepted (Informational): gitleaks does not catch personal data or drafts; WIP snapshots now
   go to private repos only, so that content stays in the operator's private GitHub repos.
 
