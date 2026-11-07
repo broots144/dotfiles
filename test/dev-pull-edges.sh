@@ -7,6 +7,10 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
 export HOME="$t/home" ZSH="$here" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$t"
+# Local-path upstreams (file transport) are refused unless DEV_PULL_ALLOW_FILE=1; a gh stub
+# marks every repo private so WIP snapshots are allowed.
+mkdir -p "$t/ghbin"; printf '#!/bin/sh\necho true\n' > "$t/ghbin/gh-private"; chmod +x "$t/ghbin/gh-private"
+export DEV_PULL_ALLOW_FILE=1 DEV_PULL_GH="$t/ghbin/gh-private"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 mkdir -p "$HOME/dev" "$t/up" "$t/bin"
 printf '#!/bin/sh\necho testhost\n' > "$t/bin/scutil"; chmod +x "$t/bin/scutil"; export PATH="$t/bin:$PATH"
@@ -60,6 +64,47 @@ git -C "$HOME/dev/wip" checkout -q -- README; printf 'S=1\n' > "$HOME/dev/wip/.e
 out=$(DEV_PULL_OWN_RE='/up/wip$' DEV_PULL_GITLEAKS="$t/clean" "$here/bin/dev-pull" 2>&1) || true
 ok grep -q 'dirty only by excluded files, no snapshot: wip' <<<"$out"
 ok [ ! -e "$rec" ]; ok [ -z "$(git -C "$t/up/wip" for-each-ref 'refs/wip/*')" ]
+
+# Snapshots go to private repos only: a public repo, or one whose visibility gh cannot tell,
+# gets none, and a snapshot pushed while it was private is deleted. The answer is cached for
+# the day (gh asked once).
+printf '#!/bin/sh\necho "$*" >> %s/gh.calls; echo false\n' "$t" > "$t/gh-public"; chmod +x "$t/gh-public"
+printf '#!/bin/sh\nexit 1\n' > "$t/gh-down"; chmod +x "$t/gh-down"
+wp() { DEV_PULL_OWN_RE='/up/wip$' DEV_PULL_GITLEAKS="$t/clean" "$here/bin/dev-pull" 2>&1 || true; }
+rm -f "$HOME/dev/wip/.env"; printf 'c\n' >> "$HOME/dev/wip/README"
+out=$(wp); ok grep -q 'snapshot pushed to refs/wip/testhost: wip' <<<"$out"; ok [ -s "$rec" ]
+rm -rf "$HOME/.local/state/dev-pull/visibility"
+out=$(DEV_PULL_GH="$t/gh-down" wp)
+ok grep -q 'no snapshot, repo public or visibility unknown: wip' <<<"$out"
+ok [ ! -e "$rec" ]; ok [ -z "$(git -C "$t/up/wip" for-each-ref 'refs/wip/*')" ]
+printf 'd\n' >> "$HOME/dev/wip/README"
+out=$(DEV_PULL_GH="$t/gh-public" wp); DEV_PULL_GH="$t/gh-public" wp >/dev/null
+ok grep -q 'no snapshot, repo public or visibility unknown: wip' <<<"$out"
+ok [ -z "$(git -C "$t/up/wip" for-each-ref 'refs/wip/*')" ]
+ok [ "$(cat "$t/gh.calls")" = "api repos/up/wip --jq .private" ]
+rm -rf "$HOME/.local/state/dev-pull/visibility"
+
+# gitleaks gets this repo's config, an empty ignore dir and --ignore-gitleaks-allow, so the
+# dirty tree it scans cannot switch its rules off.
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" > %s/leaks.args\n' "$t" > "$t/rec-leaks"; chmod +x "$t/rec-leaks"
+printf 'e\n' >> "$HOME/dev/wip/README"
+DEV_PULL_OWN_RE='/up/wip$' DEV_PULL_GITLEAKS="$t/rec-leaks" "$here/bin/dev-pull" >/dev/null 2>&1 || true
+ok grep -qxF -- "$here/lib/gitleaks.toml" "$t/leaks.args"; ok grep -qx -- --ignore-gitleaks-allow "$t/leaks.args"
+ok grep -qx -- --gitleaks-ignore-path "$t/leaks.args"
+# With the real scanner (CI installs it): a planted .gitleaks.toml that allowlists every path,
+# a .gitleaksignore and a gitleaks:allow comment do not let a token through.
+if command -v gitleaks >/dev/null; then
+  ok gitleaks dir --no-banner --config "$here/lib/gitleaks.toml" "$here/lib/gitleaks.toml" >/dev/null 2>&1
+  printf '[allowlist]\npaths = [""".*"""]\n' > "$HOME/dev/wip/.gitleaks.toml"
+  printf '*\n' > "$HOME/dev/wip/.gitleaksignore"
+  tok="ghp_$(printf 'Zq8Tn3Lw0Rb7Yc5Kd2Xf9Hj4Mv6Ps1Ga8Ue3Wo')"
+  printf 'GITHUB_TOKEN=%s # gitleaks:allow\n' "$tok" > "$HOME/dev/wip/deploy.sh"
+  out=$(DEV_PULL_OWN_RE='/up/wip$' "$here/bin/dev-pull" 2>&1) || true
+  ok grep -q 'snapshot withheld, gitleaks finding: wip' <<<"$out"
+  ok bash -c '! git -C "$1" for-each-ref --format="%(refname)" "refs/wip/*" | xargs -n1 -I{} git -C "$1" grep -q ghp_ {} 2>/dev/null' _ "$t/up/wip"
+else
+  echo "  (gitleaks not installed: real-scanner case skipped)"
+fi
 
 (( fail == 0 )) && echo "ok dev-pull-edges"
 exit "$fail"

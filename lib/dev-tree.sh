@@ -67,16 +67,21 @@ DEV_TREE_GIT=(git -c safe.bareRepository=explicit -c core.fsmonitor=false)
 # dev_tree_repos <src/> <outfile>: NUL-separated list of every .git directory under <src>
 # (nested ones too), relative to <src>, bulk folders pruned. The repo half of dev_tree_lists,
 # on its own because bin/dev-pull needs only this and the ignored-file scan is slow.
+# Rebuildable output (DEV_TREE_REBUILDABLE: .pio, .build, target, ...) is pruned too, unless the
+# directory is itself a checkout: the third-party clones a build tool leaves there
+# (.pio/libdeps/*, .build/checkouts/*) are not ours to fetch, merge, bundle or sync.
 dev_tree_repos() {
-  local src="$1" out="$2" e bulk=()
+  local src="$1" out="$2" e bulk=() rb=()
   for e in "${DEV_TREE_EXCLUDES[@]}"; do
     case "$e" in
       /*/) bulk+=(-o -path "./${e:1:${#e}-2}") ;;
       */)  bulk+=(-o -name "${e%/}") ;;
     esac
   done
+  for e in "${DEV_TREE_REBUILDABLE[@]}"; do rb+=(-o -name "$e"); done
   # find exits 1 on one unreadable or vanished entry; keep what it listed (pipefail callers).
-  { (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune) || true; } | dev_tree_strip > "$out"
+  { (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune \
+      -o -type d \( -false "${rb[@]}" \) -exec sh -c '! test -e "$1/.git"' _ {} \; -prune) || true; } | dev_tree_strip > "$out"
 }
 
 # dev_tree_private_files <src/> <workdir>: NUL-separated paths of what git does not carry:

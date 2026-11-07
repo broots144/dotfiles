@@ -1,0 +1,6 @@
+# gitleaks config for bin/dev-pull's WIP snapshot scan. dev-pull passes it with --config so the
+# repo's own .gitleaks.toml (which the dirty tree being scanned could change) is never read.
+title = "dev-pull WIP snapshot scan"
+
+[extend]
+useDefault = true

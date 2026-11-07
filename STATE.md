@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-06 by Claude (test coverage, branch tests/coverage-2026-11-06c): 9 new tests, `script/coverage`, CI runs the suite on macOS; one bug fixed in install-launchd.sh (host marker matched n0 against n0-2).
+Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1/dev-pull-hardening): dev-pull no longer runs repo-local git config and snapshots only private repos (F1, F3); node/install.sh removed (L1).
 
 ## Phases
 
@@ -49,6 +49,23 @@ Last updated: 2026-11-06 by Claude (test coverage, branch tests/coverage-2026-11
 - dev-pull WIP snapshots: files inside secret-named directories are excluded (`<name>/**`); a
   missing gitleaks withholds the push; the local record of a snapshot is dropped only once the
   remote ref is really gone. `DEV_PULL_OWN_RE` / `DEV_PULL_GITLEAKS` exist for the tests.
+- dev-pull and untrusted repos (security review 2026-11-07, F1/F3, D-009): it fetches only
+  origins on GitHub, plus the EREs in the local, untracked `~/.config/dev-pull/trusted-origins`
+  (n0 lists its self-hosted forge there); others are `foreign`, skipped, and the MacBook sync
+  follows n0 for them. A repo whose local config names a filter, merge or diff driver, a
+  credential helper, a url rewrite, a remote helper, a pushurl, an include or a core.worktree is `unsafe`
+  and skipped. Every call runs with hooks off, only the https and ssh transports, the stock
+  upload-pack/receive-pack and the askpass/ssh command from the script. The summary line ends in
+  `, N skipped`. Third-party clones inside rebuildable output (.pio/libdeps, .build/checkouts)
+  are no longer listed as repos (dev_tree_repos prunes DEV_TREE_REBUILDABLE unless the dir is a
+  checkout itself), so dev-pull, the bundles and the MacBook sync leave them alone.
+  WIP snapshots go only to private repos (`gh api repos/X --jq .private`, cached per day in
+  `~/.local/state/dev-pull/visibility`; unknown counts as public and clears an old snapshot).
+  gitleaks runs with `lib/gitleaks.toml`, an empty ignore dir and `--ignore-gitleaks-allow`, so
+  the scanned tree cannot switch rules off. Pinned by test/untrusted-input.sh and
+  test/dev-pull-edges.sh (real gitleaks case; CI installs gitleaks). `DEV_PULL_ALLOW_FILE=1`
+  and `DEV_PULL_GH` exist for the tests.
+- node/install.sh (`sudo npm install spoof -g`, unpinned, as root) deleted (L1).
 - dev-sync-from-n0's run lock is a symlink `lock.pid -> <pid>` (atomic; pid checked to be a
   sync process); a stale lock is removed only if it still names the stale pid, the exit trap
   removes it only while it names this run, and a live run of the old mkdir-lock version makes

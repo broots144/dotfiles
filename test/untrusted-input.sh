@@ -96,5 +96,44 @@ git -C "$t/up.git" show master:gitconfig.symlink | grep -q extraheader && { echo
   PATH="$t/bin:$PATH" sh bin/dot -p >/dev/null 2>&1 </dev/null || true )
 git -C "$t/up.git" show master:bin/dot | grep -q 'u:tok@' && { echo "FAIL: dot -p published a credential-shaped line"; fail=1; }
 
+# dev-pull (launchd, every 20 min, every checkout under ~/dev): repo-local config must not run
+# a command through the transport (uploadpack on a local upstream, ext::), hooks on the merge,
+# a filter driver on the checkout, or a worktree outside the repo. Local upstreams need
+# DEV_PULL_ALLOW_FILE=1 (the tests' hook), so the hook and filter cases use it; the transport
+# cases are checked both ways.
+dp() { HOME="$t/dp" ZSH="$here" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$t" \
+  DEV_PULL_GH=/usr/bin/false "$here/bin/dev-pull" 2>&1 || true; }
+dpup() {  # <name>: upstream $t/dpup/<name> one commit ahead of the clone $t/dp/dev/<name>
+  G init -q -b main "$t/dpup/$1"; echo a > "$t/dpup/$1/f"; G -C "$t/dpup/$1" add f; G -C "$t/dpup/$1" commit -qm i
+  git clone -q "$t/dpup/$1" "$t/dp/dev/$1"; echo b >> "$t/dpup/$1/f"; G -C "$t/dpup/$1" commit -qam two
+}
+mkdir -p "$t/dp/dev" "$t/dpup"
+dpup upl; git -C "$t/dp/dev/upl" config remote.origin.uploadpack "touch $t/pwned-dp-upl; git-upload-pack"
+dpup ext; git -C "$t/dp/dev/ext" remote set-url origin "ext::sh -c touch% $t/pwned-dp-ext"
+dpup hook; mkdir "$t/hooks"
+printf '#!/bin/sh\ntouch %s/pwned-dp-hook\n' "$t" | tee "$t/hooks/post-merge" > "$t/dp/dev/hook/.git/hooks/post-merge"
+chmod +x "$t/hooks/post-merge" "$t/dp/dev/hook/.git/hooks/post-merge"
+dpup hook2; git -C "$t/dp/dev/hook2" config core.hooksPath "$t/hooks"
+dpup filt; git -C "$t/dp/dev/filt" config filter.x.smudge "touch $t/pwned-dp-filt; cat"
+echo '* filter=x' > "$t/dpup/filt/.gitattributes"; echo c > "$t/dpup/filt/g"; G -C "$t/dpup/filt" add .; G -C "$t/dpup/filt" commit -qm attrs
+dpup wt; mkdir "$t/elsewhere"; git -C "$t/dp/dev/wt" config core.worktree "$t/elsewhere"
+dpup push; git -C "$t/dp/dev/push" config remote.origin.pushurl "$t/elsewhere.git"
+dpup insteadof; git -C "$t/dp/dev/insteadof" config url."ext::sh -c touch% $t/pwned-dp-url% #".insteadOf "$t/dpup/"
+out=$(dp)
+for w in upl ext hook filt url; do no "$t/pwned-dp-$w" "dev-pull ran repo-local $w command (no file transport)"; done
+grep -q "origin not on GitHub or trusted-origins, skipped: hook" <<<"$out" || { echo "FAIL: dev-pull fetched a local-path origin"; fail=1; }
+out=$(DEV_PULL_ALLOW_FILE=1 dp)
+for w in upl ext hook filt url; do no "$t/pwned-dp-$w" "dev-pull ran repo-local $w command"; done
+[[ "$(git -C "$t/dp/dev/hook" log -1 --format=%s)" == two && "$(git -C "$t/dp/dev/hook2" log -1 --format=%s)" == two ]] \
+  || { echo "FAIL: dev-pull did not fast-forward the hook fixtures"; fail=1; }
+for c in "upl (remote.origin.uploadpack)" "filt (filter.x.smudge)" "wt (core.worktree)" "push (remote.origin.pushurl)"; do
+  grep -qF "repo-local git config can run commands (${c#* (}" <<<"$(grep -F ": ${c%% *}" <<<"$out")" \
+    || { echo "FAIL: dev-pull did not skip ${c%% *}"; fail=1; }
+done
+[[ -z "$(ls -A "$t/elsewhere")" ]] || { echo "FAIL: dev-pull checked out into core.worktree"; fail=1; }
+grep -q "skipped: ext" <<<"$out" || { echo "FAIL: dev-pull fetched an ext:: origin"; fail=1; }
+grep -q "skipped: insteadof" <<<"$out" || { echo "FAIL: dev-pull followed a repo-local url.insteadOf"; fail=1; }
+grep -q ', 6 skipped' <<<"$out" || { echo "FAIL: dev-pull skip count ($out)"; fail=1; }
+
 (( fail == 0 )) && echo "ok untrusted-input"
 exit "$fail"
