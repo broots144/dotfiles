@@ -168,5 +168,38 @@ grep -q ", 1 skipped" <<<"$out" || { echo "FAIL: dev-pull submodule skip count (
 git -C "$t/dps/dev/nab/sub" cat-file -e "$new_sub" 2>/dev/null && { echo "FAIL: dev-pull fetch recursed into a submodule"; fail=1; }
 [[ "$(git -C "$t/dps/dev/nab" log -1 --format=%s)" == bump ]] || { echo "FAIL: dev-pull did not fast-forward the submodule superproject ($out)"; fail=1; }
 
+# dev-pull and the origin remote (review 2026-11-07 r3, N1). `git push origin` pushes to every
+# remote.origin.url when no pushurl is set, so a planted second url would get the WIP snapshot:
+# the repo is unsafe and skipped. A planted remote.origin.fetch mapping onto refs/heads must
+# not force-update or (with --prune) delete local branches: dev-pull fetches with its own
+# refspecs and --refmap= , never the configured ones.
+dpn() { HOME="$t/dpn" ZSH="$here" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$t" \
+  DEV_PULL_GH="$t/gh-private" DEV_PULL_GITLEAKS="$t/leaks-ok" DEV_PULL_OWN_RE='/dpnup/' DEV_PULL_ALLOW_FILE=1 \
+  "$here/bin/dev-pull" 2>&1 || true; }
+printf '#!/bin/sh\necho true\n' > "$t/gh-private"; printf '#!/bin/sh\nexit 0\n' > "$t/leaks-ok"; chmod +x "$t/gh-private" "$t/leaks-ok"
+mkdir -p "$t/dpn/dev" "$t/dpnup"
+for s in two fmap; do
+  G init -q -b main "$t/dpnup/$s"; echo a > "$t/dpnup/$s/f"; G -C "$t/dpnup/$s" add f; G -C "$t/dpnup/$s" commit -qm i
+  git clone -q "$t/dpnup/$s" "$t/dpn/dev/$s"; echo b >> "$t/dpnup/$s/f"; G -C "$t/dpnup/$s" commit -qam two
+done
+G -C "$t/dpnup/fmap" branch other   # a single-branch clone stays narrow (only safe configured refspecs kept)
+git clone -q --single-branch "$t/dpnup/fmap" "$t/dpn/dev/narrow"
+G init -q --bare "$t/stolen.git"
+git -C "$t/dpn/dev/two" config --add remote.origin.url "$t/stolen.git"; echo dirty >> "$t/dpn/dev/two/f"
+keep0=$(git -C "$t/dpn/dev/fmap" rev-parse HEAD)
+G -C "$t/dpnup/fmap" update-ref refs/wip/book HEAD   # the other host's snapshot still arrives
+git -C "$t/dpn/dev/fmap" branch keep; git -C "$t/dpn/dev/fmap" branch mine/work
+git -C "$t/dpn/dev/fmap" config --add remote.origin.fetch '+refs/heads/main:refs/heads/keep'
+git -C "$t/dpn/dev/fmap" config --add remote.origin.fetch '+refs/heads/gone/*:refs/heads/mine/*'
+out=$(dpn)
+[[ -z "$(git -C "$t/stolen.git" for-each-ref)" ]] || { echo "FAIL: dev-pull pushed a WIP snapshot to a second remote.origin.url"; fail=1; }
+grep -q "repo-local git config can run commands (remote.origin.url, 2 urls), skipped: two" <<<"$out" \
+  || { echo "FAIL: dev-pull did not skip a repo with two origin urls ($out)"; fail=1; }
+[[ "$(git -C "$t/dpn/dev/fmap" rev-parse keep)" == "$keep0" ]] || { echo "FAIL: dev-pull fetch force-updated a local branch through a planted refspec"; fail=1; }
+git -C "$t/dpn/dev/fmap" rev-parse -q --verify refs/heads/mine/work >/dev/null || { echo "FAIL: dev-pull fetch --prune deleted a local branch through a planted refspec"; fail=1; }
+git -C "$t/dpn/dev/fmap" rev-parse -q --verify refs/wip/book >/dev/null || { echo "FAIL: dev-pull did not fetch refs/wip/* of an own repo"; fail=1; }
+git -C "$t/dpn/dev/narrow" rev-parse -q --verify refs/remotes/origin/other >/dev/null && { echo "FAIL: dev-pull widened a single-branch clone's fetch"; fail=1; }
+[[ "$(git -C "$t/dpn/dev/fmap" log -1 --format=%s)" == two ]] || { echo "FAIL: dev-pull did not fast-forward fmap ($out)"; fail=1; }
+
 (( fail == 0 )) && echo "ok untrusted-input"
 exit "$fail"
