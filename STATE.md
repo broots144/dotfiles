@@ -91,6 +91,15 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   the scanned tree cannot switch rules off. Pinned by test/untrusted-input.sh and
   test/dev-pull-edges.sh (real gitleaks case; CI installs gitleaks). `DEV_PULL_ALLOW_FILE=1`
   and `DEV_PULL_GH` exist for the tests.
+- dev-pull and the origin remote (review r3, N1, N6): a repo with more than one
+  `remote.origin.url` is `unsafe` and skipped (`git push origin` pushes to every url, and only
+  the first is checked, so a planted second url got the WIP snapshot). Fetches pass their own
+  refspecs with `--refmap=`: the configured `remote.origin.fetch` lines that write only
+  remote-tracking refs (refs/heads into refs/remotes/origin, or a tag onto the same name; a
+  shallow single-branch clone such as birdnet-go stays narrow), else the default, plus
+  `refs/wip/*` for own repos; a planted mapping onto refs/heads is ignored. `drop_identical`
+  diffs with `--no-renames`, so an identical untracked copy of a file renamed into place no
+  longer blocks the fast-forward. Pinned by test/untrusted-input.sh and test/dev-pull.sh.
 - node/install.sh (`sudo npm install spoof -g`, unpinned, as root) deleted (L1).
 - dev-sync-from-n0's run lock is a symlink `lock.pid -> <pid>` (atomic; pid checked to be a
   sync process); a stale lock is removed only if it still names the stale pid, the exit trap

@@ -41,6 +41,18 @@ ok grep -q 'untracked files differ from origin/main, fetch only: diff (secrets/x
 ok [ "$(git -C "$HOME/dev/edits" rev-list --count HEAD..origin/main)" = 1 ]
 ok grep -q 'STUCK 0h behind origin/main: edits' <<<"$out"
 
+# An identical untracked copy of a file the incoming commits rename into place is dropped too
+# (review r3, N6: rename detection turned the add into an R, the copy stayed, the merge failed).
+git init -q -b main "$t/up/ren"; printf 'rename me\n' > "$t/up/ren/old.txt"
+git -C "$t/up/ren" add old.txt; git -C "$t/up/ren" commit -qm init; git clone -q "$t/up/ren" "$HOME/dev/ren"
+git -C "$t/up/ren" mv old.txt new.txt; git -C "$t/up/ren" commit -qm rename
+printf 'rename me\n' > "$HOME/dev/ren/new.txt"
+out=$("$here/bin/dev-pull" 2>&1) || true
+ok grep -q 'removed untracked ren/new.txt: identical to origin/main' <<<"$out"
+ok git -C "$HOME/dev/ren" diff --quiet HEAD origin/main
+ok [ -z "$(git -C "$HOME/dev/ren" status --porcelain)" ]
+rm -rf "$HOME/dev/ren"
+
 # A dry run calls a diverged checkout diverged, not a fast-forward.
 git -C "$HOME/dev/edits" stash -q
 git -C "$HOME/dev/edits" commit -q --allow-empty -m local
