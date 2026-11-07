@@ -4,7 +4,8 @@
 #
 # Renders each macos/*.plist (rewriting __HOME__ to the real $HOME, since
 # launchd does not expand ~), drops it into ~/Library/LaunchAgents, and
-# (re)bootstraps it into the current GUI session. Idempotent — safe to re-run.
+# (re)bootstraps it into the current GUI session. Idempotent, safe to re-run. An agent that
+# will not load is reported and the rest still load; the run then exits 1.
 #
 # A plist that carries `<!-- dotfiles-hosts: a b -->` (or `a,b`) is installed only on those hosts
 # (and unloaded/removed elsewhere). The host is HostName, else LocalHostName: Bonjour renames
@@ -19,6 +20,27 @@ agents_dir="$HOME/Library/LaunchAgents"
 uid="$(id -u)"
 
 mkdir -p "$agents_dir" "$HOME/Library/Logs"
+err="$(mktemp)"; trap 'rm -f "$err"' EXIT
+failed=0
+
+# Reload cleanly: boot it out if loaded, then boot it back in. bootout returns before the job
+# is gone, and a bootstrap of the same label meanwhile fails with "Bootstrap failed: 5", which
+# under set -e stopped the script and left the later agents unrefreshed (review r3, N4). So
+# wait (up to 5 s) until `launchctl print` no longer finds it, then try the bootstrap 3 times.
+reload() {  # <label> <plist>
+  local i
+  launchctl bootout "gui/$uid/$1" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    launchctl print "gui/$uid/$1" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  for i in 1 2 3; do
+    launchctl bootstrap "gui/$uid" "$2" 2>"$err" && return 0
+    (( i < 3 )) && sleep 1
+  done
+  cat "$err" >&2
+  return 1
+}
 me="$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)"
 
 shopt -s nullglob
@@ -42,12 +64,13 @@ for src in "$here"/com.broots.*.plist; do
 
   sed "s|__HOME__|$HOME|g" "$src" > "$dst"
 
-  # Reload cleanly: boot it out if already loaded, then boot it back in.
-  launchctl bootout "gui/$uid/$label" 2>/dev/null || true
-  launchctl bootstrap "gui/$uid" "$dst"
+  if ! reload "$label" "$dst"; then
+    echo "failed to load $label" >&2; failed=1; continue
+  fi
   launchctl enable "gui/$uid/$label"
 
   echo "loaded $label"
 done
 
+if (( failed )); then echo "LaunchAgents installed, with failures (see above)." >&2; exit 1; fi
 echo "LaunchAgents installed."

@@ -116,10 +116,11 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   the new one skip. dev-push-to-n0 exits 4 when an rsync comparison fails (rsync 23/24, a file
   vanished, are reported and not fatal). A local refs cache entry is seeded once from a matching
   iCloud `.refs`, which is then removed.
-- Tests: `script/test` runs 15 regression tests (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
+- Tests: `script/test` runs 16 regression tests (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
   `brew-wrapper`, `check-state`, `dev-icloud-backup`, `dev-icloud-backup-edges`, `dev-pull`,
   `dev-pull-edges`, `dev-push-to-n0`, `dev-sync-from-n0`, `dev-sync-lock`, `install-launchd`,
-  `untrusted-input`, `workflow-pinning`); all pass on n0 2026-11-07 under /bin/bash 3.2.
+  `legacy-installers`, `untrusted-input`, `workflow-pinning`); all pass on n0 2026-11-07 under
+  /bin/bash 3.2.
   The MacBook sync tests reach a fake n0 (a directory) through an ssh stub
   (`test/lib/fake-n0.sh`), passed as `DEV_SYNC_SSH` so a Homebrew ssh ahead in PATH cannot
   shadow it and reach the real n0; GitHub is unreachable in them; brew, mas, scutil, launchctl and
@@ -133,6 +134,16 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   the job summary, not gated).
 - install-launchd.sh matches the `dotfiles-hosts` marker on whole names: `grep -w n0` also matched
   a marker naming `n0-2` (fixed on this branch, pinned by `test/install-launchd.sh`).
+- install-launchd.sh (review r3, N4): after `launchctl bootout` it waits (up to 5 s) until
+  `launchctl print` no longer finds the job, then tries the bootstrap 3 times; an agent that
+  still fails ("Bootstrap failed: 5") is reported, the remaining agents still load, and the
+  run exits 1 (before, set -e stopped at the first failure). Pinned by test/install-launchd.sh.
+- Legacy installers (review r3, N5): `macos/set-shell.sh` (set UserShell to the missing
+  /usr/local/bin/zsh, piped the unpinned oh-my-zsh installer from master into sh) deleted;
+  `script/bootstrap` sets the login shell to /bin/zsh with chsh only when it differs, its
+  fail() exits 1, and pipefail makes the dependency step's failure reach it.
+  test/legacy-installers.sh pins this and allows a downloaded installer piped into a shell
+  only in homebrew/install.sh (Homebrew's documented installer, run only when brew is missing).
 - `state-guard.yml` uses `actions/checkout` v7.0.1, SHA pinned (PR #9, 2026-11-06).
 - Actions supply chain (review r2, L3): the repo setting `sha_pinning_required` is true (set
   2026-11-07 with `gh api -X PUT repos/broots144/dotfiles/actions/permissions`), so GitHub

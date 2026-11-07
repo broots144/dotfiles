@@ -6,6 +6,9 @@ cd "$(dirname "$0")/.."
 DOTFILES_ROOT=$(pwd -P)
 
 set -e
+# The dependency step below is `bin/dot | while ...`: without pipefail its failure never
+# reached fail().
+set -o pipefail
 
 echo ''
 
@@ -24,7 +27,7 @@ success () {
 fail () {
   printf "\r\033[2K  [\033[0;31mFAIL\033[0m] $1\n"
   echo ''
-  exit
+  exit 1
 }
 
 setup_gitconfig () {
@@ -152,7 +155,13 @@ then
     fail "error installing dependencies"
   fi
 
-  sudo dscl . -create /Users/$USER UserShell /usr/local/bin/zsh
+  # Login shell: macOS ships zsh as /bin/zsh. The old /usr/local/bin/zsh does not exist on Apple
+  # silicon and left the account without a working shell (review r3, N5). chsh asks for the
+  # password.
+  if [ "$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}')" != /bin/zsh ]
+  then
+    chsh -s /bin/zsh || fail "could not set the login shell to /bin/zsh"
+  fi
 
 fi
 
