@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1/backup-evicted): evicted mirror files that changed are removed before rsync (L4 fix forward after the first live run).
+Last updated: 2026-11-07 by Claude (security review r1 closed out: PRs #12, #13, #14 merged and deployed on n0; grade A).
 
 ## Phases
 
@@ -126,16 +126,51 @@ ok check-state
 verify-phase-6 ok
 ```
 
+## Security grade
+
+Current grade: **A** (security review 2026-11-07 r1; rubric: A = no open Medium or higher and
+every open Low documented with a reason).
+
+- Fixed and deployed on n0 2026-11-07: F1 dev-pull ran repo-local git config (PR #12), F3 WIP
+  snapshots to public repos (PR #12), L1 `sudo npm install spoof -g` (PR #12), F2 worktree and
+  submodule ignored files in the plaintext mirror (PR #13), L4 nightly backup failing (PR #13,
+  #14).
+- Verified live: dev-pull run via launchctl kickstart exit 0, `0 skipped` (the self-hosted forge
+  is in n0's local trusted-origins file); dev-icloud-backup run 2026-11-07 14:27Z exit 0 (removed
+  2,127 stale evicted mirror files, no rsync errors); every exclude rule path, including
+  `forks/MeshCore-v1.18/.pio`, `StockDock/.build` and `tv-fleet/private`, is gone from the mirror.
+- Not A+: the open Lows below remain, and the CI's Homebrew tools are not version-pinned.
+
+Open Lows, each accepted or blocked:
+
+- BLOCKED on the operator (Low): plaintext copies mirrored before the fixes (`tv-fleet/private/`
+  before 2026-11-06, worktree ignored files before PR #13) sit in iCloud Drive "Recently Deleted"
+  until they are purged or expire after 30 days, and the TV pairing tokens were in them. Purging
+  "Recently Deleted" and rotating the pairing tokens are dashboard and device steps for the
+  operator. The copies sit only in the operator's own iCloud account; they were never public.
+- Accepted (Low): dev-pull's `unsafe_re` is a deny-list of repo-local keys that can name a command.
+  A key a future git adds would not be in it. Mitigated by the -c overrides (hooks off, https and
+  ssh only, stock upload-pack), the GitHub-only origin rule and GIT_ASKPASS/GIT_SSH_COMMAND from
+  the script; test/untrusted-input.sh pins the known vectors. Revisit on a major git upgrade.
+- Accepted (Low): dev-sync-from-n0 on the MacBook clones and fast-forwards from n0 (fallback)
+  with DEV_TREE_GIT only, not dev-pull's hardened set. n0 is the operator's own machine and a
+  clone does not carry n0's repo-local config; the laptop's checkouts are its own.
+- Accepted (Low): CI installs age, bash, just, shellcheck, jq and gitleaks from Homebrew without
+  version pins (bottles are checksummed; the job has `contents: read` only and no secrets).
+  GitHub Actions are pinned by SHA.
+- Accepted (Informational): gitleaks does not catch personal data or drafts; WIP snapshots now
+  go to private repos only, so that content stays in the operator's private GitHub repos.
+
 ## Open / BLOCKED
 
-- After the bug sweep merges: check the next nightly run on n0 (`~/Library/Logs/dev-icloud-backup.log`,
-  `LAST_RUN.json` exit 0) and that the mirror no longer holds `tv-fleet/private/`. The leaked
-  plaintext copies also sit in iCloud "Recently Deleted" for 30 days; purging them and rotating the
-  TV pairing tokens are operator steps (not done by agents).
+- Operator: purge iCloud Drive "Recently Deleted" (plaintext copies from before the 2026-11-06
+  and 2026-11-07 fixes) and rotate the TV pairing tokens (see Security grade).
 - Legacy holman scripts (`bin/dot`, `bin/git-up`, `bin/mustacheme`, `script/bootstrap`) have
   shellcheck warnings; `just check` lints only the maintained scripts. Clean up or delete unused ones.
 - README.md is still holman's upstream text; it does not describe the launchd jobs or the two hosts.
 
 ## Next
 
-- Merge the bug sweep PR; watch the first nightly backup after it (archive size, exit code).
+- Watch the next nightly backup (`LAST_RUN.json` exit 0, no "removed ... evicted" storm) and the
+  first dev-pull WIP snapshot of a private repo (visibility cache in
+  `~/.local/state/dev-pull/visibility`).
