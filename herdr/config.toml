@@ -1,0 +1,43 @@
+# herdr config for n0 and book. Linked to ~/.config/herdr/config.toml by herdr/install.sh.
+# herdr writes its own UI changes through the link (std::fs::write follows it), so a setting
+# changed in herdr's settings panel shows up here as a git diff: commit it or revert it.
+# Version pin and reasons: docs/DECISIONS.md D-010. Usage: docs/herdr.md.
+
+# Onboarding chosen once; this file is the record.
+onboarding = false
+
+[theme]
+# Ghostty reports light/dark; herdr follows it.
+name = "catppuccin"
+auto_switch = true
+dark_name = "catppuccin"
+light_name = "catppuccin-latte"
+
+[terminal]
+# macOS login shells, like a new Ghostty tab.
+shell_mode = "auto"
+new_cwd = "follow"
+
+[update]
+# Homebrew owns the binary and the version is pinned (D-010); herdr's own updater would
+# install outside Homebrew. Agent-detection rules come from the pinned build, not herdr.dev.
+version_check = false
+manifest_check = false
+
+[ui.toast]
+# Ask the outer terminal (Ghostty, OSC 9/777) for a desktop notification when an agent in a
+# background workspace finishes or needs attention.
+delivery = "terminal"
+delay_seconds = 1
+
+[ui.sound]
+enabled = true
+
+[session]
+# Claude sessions come back after a server restart (the claude integration reports the refs).
+resume_agents_on_restore = true
+
+[experimental]
+# Never write pane screen history to disk: terminal output can hold secrets.
+pane_history = false
+allow_nested = false

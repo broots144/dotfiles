@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent: the default herdr server (agent multiplexer, D-011). Panes and agents live in
+  this process; `herdr` in Ghostty or over SSH attaches to it. Restarted only when it crashes:
+  `herdr server stop` exits 0 and stays stopped until the next login or `launchctl kickstart`.
+  The environment is fixed here so panes never inherit a transient SSH session's variables.
+
+  Installed/loaded by macos/install-launchd.sh (HOME placeholders rewritten at install time).
+-->
+<!-- dotfiles-hosts: n0 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.herdr-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__HOME__/.dotfiles/bin/herdr-server</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>SHELL</key>
+        <string>/bin/zsh</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <!-- Agents are interactive work: no background throttling. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/herdr-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/herdr-server.log</string>
+</dict>
+</plist>

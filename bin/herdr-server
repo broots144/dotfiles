@@ -1,0 +1,28 @@
+#!/bin/bash
+# Run the default herdr server under launchd (macos/com.broots.herdr-server.plist, D-011).
+#
+# - ~/.config/herdr holds the API and client sockets (0600, set by herdr), session.json and
+#   herdr's logs (0644 as herdr writes them). The directory goes to 0700 first, so no other
+#   local account (gha-runner runs CI jobs on n0) can read those or reach the sockets.
+# - A server someone started by hand (`herdr` in a terminal) owns the socket: wait for it to
+#   stop instead of failing and being restarted every 10 s.
+# - No umask change: pane shells inherit it, and agents' files must keep normal modes.
+set -u
+
+HERDR_BIN="${HERDR_BIN:-/opt/homebrew/bin/herdr}"
+HERDR_DIR="${HERDR_DIR:-$HOME/.config/herdr}"
+WAIT_S="${HERDR_SERVER_WAIT_S:-30}"
+
+mkdir -p "$HERDR_DIR/sessions"
+chmod 700 "$HERDR_DIR" "$HERDR_DIR/sessions"
+
+running() {
+  "$HERDR_BIN" status server 2>/dev/null | grep -q '^ *status: running'
+}
+
+while running; do
+  sleep "$WAIT_S"
+done
+
+echo "$(date -u +%FT%TZ) herdr-server: starting $("$HERDR_BIN" --version 2>/dev/null)"
+exec "$HERDR_BIN" server
