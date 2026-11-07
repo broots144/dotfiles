@@ -82,12 +82,16 @@ rm -rf "$HOME/dev/_wt/main/gone"; git -C "$m" worktree prune
 mkdir -p "$HOME/dev/notes/.build/App.app" "$root/dev/notes/.build/App.app/Contents"
 echo b > "$HOME/dev/notes/.build/App.app/x"; echo b > "$root/dev/notes/.build/App.app/Contents/Info.plist"
 echo canary > "$root/escape-canary"
+# An evicted package directory in the mirror fails stat itself (2026-11-07 17:34Z, exit 23:
+# "ClaudeGlance.xcodeproj/xcshareddata: fstatat: Resource deadlock avoided").
+mkdir -p "$root/dev/notes/App.xcodeproj/xcshareddata"
 cat > "$t/rsync-once" <<EOF
 #!/bin/sh
 n=\$(cat "$t/rsync.n" 2>/dev/null || echo 0); echo \$((n + 1)) > "$t/rsync.n"
 if [ "\$n" -lt "\${FAILS:-1}" ]; then
   echo "rsync(1): error: notes/.build/App.app: unlinkat: Directory not empty" >&2
   echo "rsync(1): error: notes/a.txt: mmap: Resource deadlock avoided" >&2
+  echo "rsync(1): error: notes/App.xcodeproj/xcshareddata: fstatat: Resource deadlock avoided" >&2
   echo "rsync(1): error: ../escape-canary: unlinkat: Directory not empty" >&2
   echo "rsync(0): error: unexpected end of file" >&2; exit 1
 fi
@@ -96,7 +100,7 @@ EOF
 chmod +x "$t/rsync-once"
 rm -f "$t/rsync.n"; DEV_BACKUP_RSYNC="$t/rsync-once" run
 ok [ "$rc" = 0 ]; ok [ "$(cat "$t/rsync.n")" = 2 ]
-ok grep -q 'removed notes/.build/App.app from the mirror' <<<"$out"; ok grep -q 'retrying the mirror (attempt 2 of 3)' <<<"$out"
+ok grep -q 'removed notes/.build/App.app from the mirror' <<<"$out"; ok grep -q 'removed notes/App.xcodeproj/xcshareddata from the mirror' <<<"$out"; ok grep -q 'retrying the mirror (attempt 2 of 3)' <<<"$out"
 ok [ ! -e "$root/dev/notes/.build" ]; ok [ -f "$root/dev/notes/a.txt" ]; ok [ -f "$root/escape-canary" ]
 ok grep -q '"exit":0' "$root/LAST_RUN.json"
 mkdir -p "$root/dev/notes/.build/App.app"; rm -f "$t/rsync.n"

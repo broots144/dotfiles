@@ -60,6 +60,11 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   file or directory"; the log line says `N gone since the scan`. Any other tar error, or age
   failing, still ends in status 4 with the previous archive kept. `DEV_BACKUP_TAR` is the test
   hook (test/dev-icloud-backup-edges.sh).
+- iCloud backup, 2026-11-07 17:34Z deploy check: the mirror rsync exited 23 on evicted
+  package directories (`ClaudeGlance.xcodeproj/...: fstatat: Resource deadlock avoided`), which
+  `icloud_fix` did not match (it knew open, mmap, read, unlink, rename). stat, fstatat and lstat
+  EDEADLK paths are now removed from the mirror and rsync runs again, like the others
+  (test/dev-icloud-backup-edges.sh). The archive and bundles in that run were fine.
 - ~/dev sync: GitHub is the hub (sublevel ADR-071). `bin/dev-pull` fast-forwards clean checkouts,
   never resets; untracked files no longer block a fast-forward and a checkout stuck for a day fails
   the run (dc1137d). `bin/dev-sync-from-n0` pulls repos plus private files to the laptop and renders
