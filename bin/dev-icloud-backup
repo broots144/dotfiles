@@ -184,6 +184,8 @@ fi
 #     holds as a package (.app, .bundle, .xcodeproj under .build/); rm -rf can.
 #   - "<file>: mmap: Resource deadlock avoided" (EDEADLK): the mirror's copy is evicted and
 #     could not be read back; it is only a stale copy of a file in ~/dev, so it is removed.
+#     An evicted package directory (.xcodeproj) fails even stat ("fstatat: Resource deadlock
+#     avoided", 2026-11-07 17:34Z, exit 23); it is removed the same way.
 # Each such path is fixed and rsync runs again, up to three times; then its status stands.
 # DEV_BACKUP_RSYNC is for the tests.
 rsync_bin="${DEV_BACKUP_RSYNC:-/usr/bin/rsync}"
@@ -194,7 +196,7 @@ icloud_fix() {  # <rsync stderr>: removes the mirror paths rsync choked on; fals
     [[ -n "$p" && "$p" != /* && "$p" != .. && "$p" != ../* && "$p" != */.. && "$p" != */../* ]] || continue
     [[ -e "$dst$p" || -L "$dst$p" ]] || continue
     rm -rf -- "${dst:?}$p" && n=$((n + 1)) && echo "$(date -u +%FT%TZ) removed $p from the mirror (iCloud refused rsync)"
-  done < <(sed -nE 's/^rsync(\([0-9]+\))?: error: (.*): (unlinkat: Directory not empty|(open|mmap|read|unlink|rename)[a-z]*: Resource deadlock avoided)$/\2/p' "$1")
+  done < <(sed -nE 's/^rsync(\([0-9]+\))?: error: (.*): (unlinkat: Directory not empty|(open|mmap|read|unlink|rename|f?stat|lstat)[a-z]*: Resource deadlock avoided)$/\2/p' "$1")
   (( n > 0 ))
 }
 # An evicted mirror file (dataless, Optimize Mac Storage) that rsync would update has to be
