@@ -57,6 +57,11 @@ export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
 # ssh transports (no file::, ext::, git:// or a local path that runs the repo's uploadpack).
 # What -c cannot neutralise (filter, merge and diff drivers, credential helpers, url rewrites,
 # remote helpers, a pushurl, includes, core.worktree) makes local_config_unsafe skip the repo.
+# So does a second remote.origin.url: with no pushurl, `git push origin` pushes to every url,
+# and only the first is checked against origin_re and own_re (review r3, N1). Fetches pass
+# their refspecs on the command line with an empty --refmap (fetch_specs), so a planted
+# remote.origin.fetch that maps onto refs/heads can neither force-update nor (with --prune)
+# delete a local branch.
 # Submodules have their own config (.git/modules/<name>/config, or sub/.git/config), which git
 # reads when it recurses: status descends into each submodule, fetch fetches them on demand.
 # So nothing recurses (the recurse settings below, --ignore-submodules=all on every status),
@@ -80,6 +85,8 @@ local_config_unsafe() {  # <dir>: prints the first repo-local key that could run
   k=$( { "${git_q[@]}" -C "$1" config --show-scope --name-only --list 2>/dev/null || true; } |
     awk -F '\t' '$1 == "local" || $1 == "worktree" {print tolower($2)}' | grep -E "$unsafe_re" | head -1)
   [[ -n "$k" ]] && { printf '%s' "$k"; return 0; }
+  k=$( { "${git_q[@]}" -C "$1" config --get-all remote.origin.url 2>/dev/null || true; } | wc -l | tr -d ' ')
+  (( k > 1 )) && { printf 'remote.origin.url, %s urls' "$k"; return 0; }
   # Absorbed submodules, nested ones too (modules/a/modules/b). `config --file` reads the file
   # only: it follows no include and runs nothing. git itself writes core.worktree into every
   # absorbed submodule's config, and nothing here runs inside a submodule, so that key is fine.
@@ -92,6 +99,23 @@ local_config_unsafe() {  # <dir>: prints the first repo-local key that could run
     printf '%s in submodule %s' "$k" "$m"; return 0
   done < <(find "$gd/modules" \( -name config -o -name config.worktree \) -type f -print0 2>/dev/null)
   return 1
+}
+
+# The refspecs to fetch for <dir>: the configured ones that write only remote-tracking refs
+# (refs/heads/... into refs/remotes/origin/..., or a tag onto the same tag name; this keeps a
+# shallow single-branch clone narrow), else git's default; plus refs/wip/* for own repos.
+fetch_specs() {  # <dir> [own]
+  local s n=0
+  while IFS= read -r s; do
+    case "$s" in *..*|*@\{*) continue ;; esac
+    if [[ "$s" =~ ^\+?refs/heads/[^:]*:refs/remotes/origin/[^:]+$ ]] ||
+       [[ "$s" =~ ^\+?(refs/tags/[^:]+):(refs/tags/[^:]+)$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+      printf '%s\n' "$s"; n=$((n + 1))
+    fi
+  done < <("${git_q[@]}" -C "$1" config --get-all remote.origin.fetch 2>/dev/null || true)
+  (( n )) || printf '%s\n' '+refs/heads/*:refs/remotes/origin/*'
+  [[ "${2:-}" == own ]] && printf '%s\n' '+refs/wip/*:refs/wip/*'
+  return 0
 }
 
 me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
@@ -181,6 +205,7 @@ wip_fetchspec() { local g=("${git_q[@]}" -C "$1"); "${g[@]}" config --get-all re
 # Untracked files that the incoming commits add with the same content are copies of what git is
 # about to write (a private file rsynced from n0 before n0 committed it): drop them so the
 # fast-forward goes through. A file that differs is left alone, and git refuses the merge.
+# --no-renames: a file the incoming commits rename into place is an add here, not an R (N6).
 drop_identical() {  # <repo> <branch>
   local r="$1" b="$2" dst="$dev/$1" p
   local g=("${git_q[@]}" -C "$dst")
@@ -189,7 +214,7 @@ drop_identical() {  # <repo> <branch>
     "${g[@]}" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue
     [[ "$("${g[@]}" hash-object -- "$dst/$p")" == "$("${g[@]}" rev-parse -q --verify "origin/$b:$p")" ]] || continue
     rm -f -- "$dst/$p" && { (( quiet )) || say "removed untracked $r/$p: identical to origin/$b"; }
-  done < <("${g[@]}" diff -z --name-only --diff-filter=A HEAD "origin/$b" 2>/dev/null)
+  done < <("${g[@]}" diff -z --name-only --no-renames --diff-filter=A HEAD "origin/$b" 2>/dev/null)
 }
 # A checkout behind origin that cannot fast-forward (edits, new files that differ, diverged) is
 # reported every run; after DEV_PULL_STUCK_HOURS (default 24) it also counts as stuck, which
@@ -225,8 +250,9 @@ while IFS= read -r r; do
   if bad=$(local_config_unsafe "$dev/$r"); then
     note "$r" unsafe; n_skip=$((n_skip + 1)); problems+=("repo-local git config can run commands ($bad), skipped: $r"); continue
   fi
-  own_repo "$dev/$r" && wip_fetchspec "$dev/$r"
-  if ! "${g[@]}" fetch -q --prune origin </dev/null 2>"$work/err"; then
+  own=""; own_repo "$dev/$r" && { wip_fetchspec "$dev/$r"; own=own; }
+  specs=(); while IFS= read -r s; do specs+=("$s"); done < <(fetch_specs "$dev/$r" "$own")
+  if ! "${g[@]}" fetch -q --prune --refmap= origin "${specs[@]}" </dev/null 2>"$work/err"; then
     note "$r" failed; n_fail=$((n_fail + 1))
     problems+=("fetch failed: $r ($(grep -m1 . "$work/err" 2>/dev/null))"); continue
   fi
