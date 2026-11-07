@@ -189,12 +189,26 @@ fi
 # Each such path is fixed and rsync runs again, up to three times; then its status stands.
 # DEV_BACKUP_RSYNC is for the tests.
 rsync_bin="${DEV_BACKUP_RSYNC:-/usr/bin/rsync}"
+# Under launchd the children of an evicted (dataless) mirror directory cannot even be stat'ed
+# (2026-11-07 17:51Z: every path inside ClaudeGlance.xcodeproj failed fstatat), so a reported
+# path that does not "exist" stands for its nearest ancestor that is an evicted directory; that
+# ancestor is what gets removed. If the nearest existing ancestor is not evicted, nothing is.
+evicted_ancestor() {  # <mirror-relative path>
+  local a="$1"
+  while [[ "$a" == */* ]]; do
+    a="${a%/*}"
+    [[ -d "$dst$a" ]] || continue
+    [[ "$(stat -f %Sf "$dst$a" 2>/dev/null)" == *"$evicted_flag"* ]] && { printf '%s' "$a"; return 0; }
+    return 1
+  done
+  return 1
+}
 icloud_fix() {  # <rsync stderr>: removes the mirror paths rsync choked on; false if none
   local p n=0
   while IFS= read -r p; do
     # Relative to the mirror, never above it.
     [[ -n "$p" && "$p" != /* && "$p" != .. && "$p" != ../* && "$p" != */.. && "$p" != */../* ]] || continue
-    [[ -e "$dst$p" || -L "$dst$p" ]] || continue
+    if [[ ! -e "$dst$p" && ! -L "$dst$p" ]]; then p=$(evicted_ancestor "$p") || continue; fi
     rm -rf -- "${dst:?}$p" && n=$((n + 1)) && echo "$(date -u +%FT%TZ) removed $p from the mirror (iCloud refused rsync)"
   done < <(sed -nE 's/^rsync(\([0-9]+\))?: error: (.*): (unlinkat: Directory not empty|(open|mmap|read|unlink|rename|f?stat|lstat)[a-z]*: Resource deadlock avoided)$/\2/p' "$1")
   (( n > 0 ))

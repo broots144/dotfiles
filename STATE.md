@@ -65,6 +65,10 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   `icloud_fix` did not match (it knew open, mmap, read, unlink, rename). stat, fstatat and lstat
   EDEADLK paths are now removed from the mirror and rsync runs again, like the others
   (test/dev-icloud-backup-edges.sh). The archive and bundles in that run were fine.
+  The 17:51Z rerun showed the reported paths are children of an evicted (dataless) mirror
+  directory, which under launchd cannot be stat'ed at all; so a reported path that does not
+  exist now stands for its nearest evicted ancestor in the mirror, which is removed (left
+  alone if that ancestor is not evicted).
 - ~/dev sync: GitHub is the hub (sublevel ADR-071). `bin/dev-pull` fast-forwards clean checkouts,
   never resets; untracked files no longer block a fast-forward and a checkout stuck for a day fails
   the run (dc1137d). `bin/dev-sync-from-n0` pulls repos plus private files to the laptop and renders
