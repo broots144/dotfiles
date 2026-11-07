@@ -11,7 +11,7 @@
 DEV_TREE_EXCLUDES=(
   /bulk-youtube-download/
   /local-image-llm/
-  node_modules/ .venv/ venv/ .terraform/ dist/ .astro/ .next/ .cache/ .aws-sam/
+  node_modules/ .venv/ venv/ .terraform/ dist/ .astro/ .next/ .cache/ .aws-sam/ .build/
   __pycache__/ .pytest_cache/ .ruff_cache/ .mypy_cache/
   '*.iso' .DS_Store
 )
@@ -64,14 +64,16 @@ dev_tree_nocase() {
 # Every git call isolated from repo-local executable config.
 DEV_TREE_GIT=(git -c safe.bareRepository=explicit -c core.fsmonitor=false)
 
-# dev_tree_repos <src/> <outfile>: NUL-separated list of every .git directory under <src>
-# (nested ones too), relative to <src>, bulk folders pruned. The repo half of dev_tree_lists,
+# dev_tree_repos <src/> <outfile> [all]: NUL-separated list of every .git directory under <src>
+# (nested ones too), relative to <src>, bulk folders pruned. With `all`, also every .git file:
+# git worktrees (~/dev/_wt) and submodules, which have a working tree but no object store. The repo half of dev_tree_lists,
 # on its own because bin/dev-pull needs only this and the ignored-file scan is slow.
 # Rebuildable output (DEV_TREE_REBUILDABLE: .pio, .build, target, ...) is pruned too, unless the
 # directory is itself a checkout: the third-party clones a build tool leaves there
 # (.pio/libdeps/*, .build/checkouts/*) are not ours to fetch, merge, bundle or sync.
 dev_tree_repos() {
-  local src="$1" out="$2" e bulk=() rb=()
+  local src="$1" out="$2" e bulk=() rb=() kind=(-type d)
+  [[ "${3:-}" == all ]] && kind=(\( -type d -o -type f \))
   for e in "${DEV_TREE_EXCLUDES[@]}"; do
     case "$e" in
       /*/) bulk+=(-o -path "./${e:1:${#e}-2}") ;;
@@ -80,7 +82,7 @@ dev_tree_repos() {
   done
   for e in "${DEV_TREE_REBUILDABLE[@]}"; do rb+=(-o -name "$e"); done
   # find exits 1 on one unreadable or vanished entry; keep what it listed (pipefail callers).
-  { (cd "$src" && find . -name .git -type d -prune -print0 -o \( -false "${bulk[@]}" \) -prune \
+  { (cd "$src" && find . -name .git "${kind[@]}" -prune -print0 -o \( -false "${bulk[@]}" \) -prune \
       -o -type d \( -false "${rb[@]}" \) -exec sh -c '! test -e "$1/.git"' _ {} \; -prune) || true; } | dev_tree_strip > "$out"
 }
 
@@ -114,15 +116,20 @@ dev_tree_private_files() {
 
 # dev_tree_lists <src/> <workdir>: writes NUL-separated lists, relative to <src>, into <workdir>:
 #   repos    every .git directory (nested ones too), bulk folders pruned
+#   checkouts every .git directory and .git file (worktrees, submodules): the ignored-file scan
+#            and the exclude rules cover each working tree, not only those with a .git dir
 #   named    files and directories with a secret-bearing name (bulk folders and .git pruned)
 #   ignored  gitignored regular files up to 1 MiB that sit outside a gitignored directory
 #   ignoredd regular files up to 1 MiB inside gitignored directories (rebuildable ones in
-#            DEV_TREE_REBUILDABLE and bulk folders left out). Archive only: the MacBook sync
+#            DEV_TREE_REBUILDABLE and bulk folders left out), the gitignored files of worktrees
+#            and submodules, and the files of a checkout git cannot read. Archive only: the MacBook sync
 #            (dev_tree_private_files) does not read it, so scratch/, logs/, cache/ and private/
 #            dirs stay on the machine that made them and are not copied both ways every 20 min.
 #   gitcfg   each repo's .git/config
 #   rules    rsync exclude rules ('- /path') for every gitignored file and directory, of any
-#            size: default-deny, nothing gitignored reaches the plaintext mirror
+#            size: default-deny, nothing gitignored reaches the plaintext mirror. A checkout
+#            whose ignored files git cannot list (a worktree whose main repo moved) is
+#            excluded whole.
 # Also fills DEV_TREE_RSYNC_EXCLUDES with --exclude args for .git, the bulk folders and the
 # secret names (case-insensitive).
 # Returns non-zero when a list could not be written (the callers refuse to mirror on that);
@@ -147,6 +154,7 @@ dev_tree_lists() {
   # Lists are NUL-separated so any legal file name survives.
   { (cd "$src" && find . \( -name .git "${bulk[@]}" \) -prune -o "${named[@]}" -prune -print0) || true; } | dev_tree_strip > "$work/named" || return 1
   dev_tree_repos "$src" "$work/repos" || return 1
+  dev_tree_repos "$src" "$work/checkouts" all || return 1
 
   # Inside an ignored directory: skip .git, bulk folders and rebuildable output.
   bulk_re=$(dev_tree_skip_re "${DEV_TREE_EXCLUDES[@]}")
@@ -157,9 +165,21 @@ dev_tree_lists() {
   prune=( \( "${prune[@]:1}" \) )
 
   : > "$work/ignored" && : > "$work/ignoredd" && : > "$work/gitcfg" && : > "$work/rules" || return 1
+  local small
   while IFS= read -r -d '' g; do
     r="${g%/.git}"
-    if [[ -f "$src$g/config" ]]; then printf '%s\0' "$g/config" >> "$work/gitcfg" || return 1; fi
+    # A worktree's or submodule's ignored files are archived only (like ignoredd): the MacBook
+    # sync covers the main checkouts, not n0's worktrees.
+    small="$work/ignored"; [[ -d "$src$g" ]] || small="$work/ignoredd"
+    if [[ -d "$src$g" && -f "$src$g/config" ]]; then printf '%s\0' "$g/config" >> "$work/gitcfg" || return 1; fi
+    if ! "${DEV_TREE_GIT[@]}" -C "$src$r" ls-files -z --others --ignored --exclude-standard --directory > "$work/ls" 2>/dev/null; then
+      # Git cannot read this checkout: nothing in it can be told apart, so none of it is mirrored.
+      [[ -n "$r" && "$r" != .git && -d "$src$r" ]] || continue
+      q="${r//\*/\\*}"; q="${q//\?/\\?}"; q="${q//\[/\\[}"
+      printf -- '- /%s/\0' "$q" >> "$work/rules" || return 1
+      { (cd "$src" && find "$r" "${prune[@]}" -prune -o -type f ! -name .DS_Store ! -name '*.iso' -size -1025k -print0) || true; } >> "$work/ignoredd" || return 1
+      continue
+    fi
     while IFS= read -r -d '' f; do
       p="$r/${f%/}"
       [[ -e "$src$p" && ! -L "$src$p" ]] || continue
@@ -177,9 +197,9 @@ dev_tree_lists() {
       printf -- '- /%s\0' "$q" >> "$work/rules" || return 1
       [[ -f "$src$p" ]] || continue
       sz=$(stat -f %z "$src$p" 2>/dev/null) || continue
-      if (( sz <= 1048576 )); then printf '%s\0' "$p" >> "$work/ignored" || return 1; fi
-    done < <("${DEV_TREE_GIT[@]}" -C "$src$r" ls-files -z --others --ignored --exclude-standard --directory 2>/dev/null || true)
-  done < "$work/repos"
+      if (( sz <= 1048576 )); then printf '%s\0' "$p" >> "$small" || return 1; fi
+    done < "$work/ls"
+  done < "$work/checkouts"
   return 0
 }
 

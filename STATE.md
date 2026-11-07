@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1/dev-pull-hardening): dev-pull no longer runs repo-local git config and snapshots only private repos (F1, F3); node/install.sh removed (L1).
+Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1/backup-worktrees): worktree and submodule ignored files kept out of the plaintext mirror (F2); the iCloud mirror survives openrsync failures on iCloud packages and evicted files (L4).
 
 ## Phases
 
@@ -39,6 +39,17 @@ Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1
   for git bundles lives in `~/.local/state/dev-icloud-backup/git`, not iCloud; a failed write
   into iCloud, an unreadable directory, a missing age key or a missing ~/dev each end in a
   status code and LAST_RUN.json instead of a silent abort.
+- iCloud backup, security review 2026-11-07 (F2, L4): the ignored-file scan and the exclude
+  rules now cover every working tree, `.git` files included (worktrees in `~/dev/_wt`,
+  submodules), not only checkouts with a `.git` directory; a worktree's ignored files were
+  mirrored in plaintext before. Their small ignored files go to the archive only (`ignoredd`),
+  so the MacBook sync scope is unchanged. A checkout git cannot read (a worktree whose main repo
+  moved) is excluded whole and its small files archived. `.build/` is a bulk exclude. rsync runs
+  with `-W`; when openrsync stops on "unlinkat: Directory not empty" (an excluded package dir
+  such as `.build/*.app` it cannot delete in iCloud) or on "Resource deadlock avoided" (an
+  evicted mirror file), those mirror paths are removed with rm and rsync runs again (at most 3
+  runs). The nightly run of 2026-11-07 had failed that way (exit 1, mirror partial).
+  `DEV_BACKUP_RSYNC` exists for the tests (test/dev-icloud-backup-edges.sh).
 - ~/dev sync: GitHub is the hub (sublevel ADR-071). `bin/dev-pull` fast-forwards clean checkouts,
   never resets; untracked files no longer block a fast-forward and a checkout stuck for a day fails
   the run (dc1137d). `bin/dev-sync-from-n0` pulls repos plus private files to the laptop and renders
