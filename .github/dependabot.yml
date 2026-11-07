@@ -1,0 +1,14 @@
+# Keeps the SHA-pinned GitHub Actions current (security review 2026-11-07 r2, L3). The "deps:"
+# prefix is a state-guard exemption (script/check-state); n0's hourly merger (sublevel ADR-089)
+# merges green Dependabot PRs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      actions:
+        patterns: ["*"]
