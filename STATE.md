@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1/backup-worktrees): worktree and submodule ignored files kept out of the plaintext mirror (F2); the iCloud mirror survives openrsync failures on iCloud packages and evicted files (L4).
+Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1/backup-evicted): evicted mirror files that changed are removed before rsync (L4 fix forward after the first live run).
 
 ## Phases
 
@@ -49,6 +49,10 @@ Last updated: 2026-11-07 by Claude (security review r1, branch sec/2026-11-07-r1
   such as `.build/*.app` it cannot delete in iCloud) or on "Resource deadlock avoided" (an
   evicted mirror file), those mirror paths are removed with rm and rsync runs again (at most 3
   runs). The nightly run of 2026-11-07 had failed that way (exit 1, mirror partial).
+  The first live run after PR #13 (2026-11-07 13:54Z) still hit EDEADLK on a new evicted file
+  each attempt (54k evicted files in the mirror, about 2,100 of them stale). So before rsync,
+  every evicted (dataless) mirror file whose size or mtime differs from ~/dev, or that ~/dev no
+  longer has, is removed; rsync writes it fresh. `DEV_BACKUP_EVICTED_FLAG` is the test hook.
   `DEV_BACKUP_RSYNC` exists for the tests (test/dev-icloud-backup-edges.sh).
 - ~/dev sync: GitHub is the hub (sublevel ADR-071). `bin/dev-pull` fast-forwards clean checkouts,
   never resets; untracked files no longer block a fast-forward and a checkout stuck for a day fails

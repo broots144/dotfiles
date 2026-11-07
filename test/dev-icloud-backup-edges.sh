@@ -105,5 +105,20 @@ ok [ "$rc" = 1 ]; ok [ "$(cat "$t/rsync.n")" = 2 ]   # nothing left to fix: no t
 printf '#!/bin/sh\necho "rsync: error: something else" >&2; exit 23\n' > "$t/rsync-other"; chmod +x "$t/rsync-other"
 DEV_BACKUP_RSYNC="$t/rsync-other" run; ok [ "$rc" = 23 ]; ok bash -c '! grep -q retrying <<<"$1"' _ "$out"
 
+# Evicted mirror files (dataless; the tests use the user-settable `hidden` flag instead) that
+# changed in ~/dev, or are gone from it, are removed before rsync, which cannot read them back
+# under launchd (EDEADLK, one file per run); an unchanged evicted file is left as it is.
+echo same > "$HOME/dev/notes/same.txt"; echo v1 > "$HOME/dev/notes/changed.txt"; echo old > "$HOME/dev/notes/gone.txt"
+run; ok [ "$rc" = 0 ]
+chflags hidden "$root/dev/notes/same.txt" "$root/dev/notes/changed.txt" "$root/dev/notes/gone.txt"
+echo v2-longer > "$HOME/dev/notes/changed.txt"; rm "$HOME/dev/notes/gone.txt"
+DEV_BACKUP_EVICTED_FLAG=hidden run; ok [ "$rc" = 0 ]
+ok grep -q 'removed 2 evicted mirror file(s)' <<<"$out"
+ok [ "$(cat "$root/dev/notes/changed.txt")" = v2-longer ]; ok [ ! -e "$root/dev/notes/gone.txt" ]
+ok bash -c '/bin/ls -lO "$1" | grep -q hidden' _ "$root/dev/notes/same.txt"   # untouched
+# Every evicted file gone from ~/dev (nothing to compare against): all removed.
+chflags hidden "$root/dev/notes/changed.txt"; rm -rf "$HOME/dev/notes/changed.txt" "$HOME/dev/notes/same.txt"
+DEV_BACKUP_EVICTED_FLAG=hidden run; ok [ "$rc" = 0 ]; ok grep -q 'removed 2 evicted mirror file(s)' <<<"$out"
+
 (( fail == 0 )) && echo "ok dev-icloud-backup-edges"
 exit "$fail"
