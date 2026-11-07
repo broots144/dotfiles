@@ -7,6 +7,10 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
 export HOME="$t/home" ZSH="$here" GIT_CONFIG_GLOBAL=/dev/null
+# Local-path upstreams (file transport) are refused unless DEV_PULL_ALLOW_FILE=1; a gh stub
+# marks every repo private so WIP snapshots are allowed.
+mkdir -p "$t/ghbin"; printf '#!/bin/sh\necho true\n' > "$t/ghbin/gh-private"; chmod +x "$t/ghbin/gh-private"
+export DEV_PULL_ALLOW_FILE=1 DEV_PULL_GH="$t/ghbin/gh-private"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 mkdir -p "$HOME/dev" "$t/up"
 fail=0

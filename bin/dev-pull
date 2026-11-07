@@ -8,6 +8,8 @@
 #
 # Per repo (nested/vendored checkouts skipped; bulk folders from lib/dev-tree.sh pruned):
 #   - no `origin`:                          reported (no-origin), nothing fetched
+#   - origin not on GitHub (or a trusted-origins pattern), or repo-local git config that could
+#     run a command: reported (foreign / unsafe, "skipped"), nothing fetched
 #   - fetch origin fails:                   reported (failed), exit 3 at the end
 #   - detached HEAD, branch missing on origin, or diverged: fetched, reported, never reset
 #   - clean and origin/<branch> is ahead:   fast-forwarded
@@ -15,7 +17,7 @@
 #     incoming commits add with identical content is removed first, one that differs makes git
 #     refuse, and the checkout is reported. The new files that stay are snapshotted as below.
 #   - dirty (edits to tracked files, or new files with nothing to pull): fetched, reported, and the working tree is
-#     snapshotted to `refs/wip/<this host>` on origin (own GitHub repos only), so uncommitted
+#     snapshotted to `refs/wip/<this host>` on origin (own private GitHub repos only), so uncommitted
 #     work, new files included, exists off this machine within 20 minutes and the other admin
 #     machine sees it (`git fetch origin` brings refs/wip/*; `git diff HEAD wip/n0`,
 #     `git restore --source=wip/n0 --worktree -- .`). The snapshot is one commit on top of HEAD,
@@ -28,8 +30,8 @@
 #
 # dev-pull [-n] [-q]    -n: fetch and report only, no merge, no snapshot.  -q: summary line only.
 # Writes ~/.local/state/dev-pull/results (one "<repo>\t<status>" line per repo; status is one
-# of ff, current, dirty, detached, diverged, no-branch, no-origin, failed) and last.json;
-# prints "dev-pull: N ff, M current, ..., K stuck" last. Stuck: behind origin and unable to
+# of ff, current, dirty, detached, diverged, no-branch, no-origin, foreign, unsafe, failed) and last.json;
+# prints "dev-pull: N ff, M current, ..., K stuck, S skipped" last. Stuck: behind origin and unable to
 # fast-forward for DEV_PULL_STUCK_HOURS (24) or more. Exit 3 if any fetch failed, else 5 if any
 # checkout is stuck, else 0.
 
@@ -47,7 +49,32 @@ say() { echo "$(date -u +%FT%TZ) $*"; }
 # Never prompt (a LaunchAgent has no terminal), never hang on a dead link.
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
-git_q=("${DEV_TREE_GIT[@]}" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30)
+# Repo data is data (D-004), also here: every checkout under ~/dev is fetched and merged
+# unattended, third-party ones included (forks, PlatformIO libdeps), so nothing repo-local may
+# name a command. GIT_SSH_COMMAND and GIT_ASKPASS take precedence over core.sshCommand and
+# core.askPass; the -c overrides come after the repo's config and win: no hooks (post-merge,
+# reference-transaction, pre-push), the stock upload-pack/receive-pack, and only the https and
+# ssh transports (no file::, ext::, git:// or a local path that runs the repo's uploadpack).
+# What -c cannot neutralise (filter, merge and diff drivers, credential helpers, url rewrites,
+# remote helpers, a pushurl, includes, core.worktree) makes local_config_unsafe skip the repo.
+export GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false
+git_q=("${DEV_TREE_GIT[@]}" -c core.hooksPath=/dev/null -c protocol.allow=never
+  -c protocol.https.allow=always -c protocol.ssh.allow=always
+  -c remote.origin.uploadpack=git-upload-pack -c remote.origin.receivepack=git-receive-pack
+  -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30)
+# Only origins on GitHub are fetched, plus the EREs in ~/.config/dev-pull/trusted-origins (one
+# per line, a self-hosted forge; kept out of this public repo). DEV_PULL_ALLOW_FILE=1 is for the
+# tests: local-path upstreams over the file transport.
+origin_re='^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/?$'
+while IFS= read -r l; do [[ -n "$l" && "$l" != \#* ]] && origin_re+="|$l"; done < <(cat "$HOME/.config/dev-pull/trusted-origins" 2>/dev/null || true)
+if [[ "${DEV_PULL_ALLOW_FILE:-}" == 1 ]]; then git_q+=(-c protocol.file.allow=always); origin_re+='|^/'; fi
+unsafe_re='^(include\.path|includeif\..*|filter\..*|merge\..*\.driver|diff\.external|diff\..*\.(command|textconv)|credential\..*|url\..*|protocol\..*|remote\..*\.(vcs|uploadpack|receivepack|pushurl)|core\.(worktree|sshcommand|gitproxy|askpass|alternaterefscommand|attributesfile)|gpg\..*|commit\.gpgsign)$'
+local_config_unsafe() {  # <dir>: prints the first repo-local key that could run a command
+  local k
+  k=$( { "${git_q[@]}" -C "$1" config --show-scope --name-only --list 2>/dev/null || true; } |
+    awk -F '\t' '$1 == "local" || $1 == "worktree" {print tolower($2)}' | grep -E "$unsafe_re" | head -1)
+  [[ -n "$k" ]] && printf '%s' "$k"
+}
 
 me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
 mkdir -p "$state/wip"
@@ -60,10 +87,33 @@ wip_ref="refs/wip/$me"
 own_re="${DEV_PULL_OWN_RE:-^(git@github\.com:|https://github\.com/)(broots144|workshop144)/}"
 gitleaks="${DEV_PULL_GITLEAKS:-gitleaks}"
 own_repo() { "${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | grep -qE "$own_re"; }
+# Snapshots go only to private repos: anyone can read refs/wip/* on a public one, and gitleaks
+# does not catch personal data or drafts. Visibility comes from the GitHub API, cached for the
+# day; unknown (no gh, offline, API error) counts as public. DEV_PULL_GH is for the tests.
+gh_bin="${DEV_PULL_GH:-gh}"
+mkdir -p "$state/visibility"
+repo_private() {  # <dir>
+  local slug rec v today
+  today=$(date -u +%F)
+  slug=$("${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | sed -E 's#\.git/?$##; s#/$##' | awk -F '[/:]' '{print $(NF-1) "/" $NF}')
+  [[ "$slug" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
+  rec="$state/visibility/${slug//\//__}"
+  v=$(cat "$rec" 2>/dev/null || true)
+  if [[ "${v%% *}" != "$today" ]]; then
+    v=$("$gh_bin" api "repos/$slug" --jq .private 2>/dev/null </dev/null || true)
+    [[ "$v" == true || "$v" == false ]] || return 1
+    v="$today $v"; printf '%s\n' "$v" > "$rec"
+  fi
+  [[ "${v#* }" == true ]]
+}
+# gitleaks runs with this repo's config and an empty ignore dir: the dirty tree being scanned
+# could otherwise add a .gitleaks.toml, a .gitleaksignore or gitleaks:allow comments.
+gitleaks_cfg="${ZSH:-$HOME/.dotfiles}/lib/gitleaks.toml"
 wip_snapshot() {  # <repo> <branch>; sets wip_msg
   local r="$1" b="$2" dst="$dev/$1" idx="$work/idx" rec="$state/wip/${1//\//__}" tree last commit ex=() e f n_new n_mod
   rm -f "$idx"
   local g=("${git_q[@]}" -C "$dst")
+  if ! repo_private "$dst"; then wip_msg="no snapshot, repo public or visibility unknown: $r"; wip_clear "$r"; return 0; fi
   export GIT_INDEX_FILE="$idx"
   "${g[@]}" read-tree HEAD || { unset GIT_INDEX_FILE; wip_msg="snapshot failed (read-tree): $r"; return 1; }
   # glob magic: '*' stops at '/', so a secret-named directory needs its own '/**' rule, or the
@@ -81,10 +131,12 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
   n_mod=$("${g[@]}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
   n_new=$("${g[@]}" ls-files --others --exclude-standard | wc -l | tr -d ' ')
   commit=$(printf 'wip(%s): %s, %s modified, %s new, %s\n\nSnapshot by dev-pull; not a branch. Secret-named and >1 MiB files left out.\n' \
-    "$me" "$b" "$n_mod" "$n_new" "$(date -u +%FT%TZ)" | "${g[@]}" commit-tree "$tree" -p HEAD) || { wip_msg="snapshot failed (commit-tree): $r"; return 1; }
+    "$me" "$b" "$n_mod" "$n_new" "$(date -u +%FT%TZ)" | "${g[@]}" commit-tree --no-gpg-sign "$tree" -p HEAD) || { wip_msg="snapshot failed (commit-tree): $r"; return 1; }
   # Fail closed: no scanner (fresh laptop, broken upgrade, odd PATH) means no push.
   command -v "$gitleaks" >/dev/null || { wip_msg="snapshot withheld, gitleaks not installed: $r"; return 1; }
-  if ! "$gitleaks" git --no-banner --exit-code 1 --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
+  mkdir -p "$work/noignore"
+  if ! "$gitleaks" git --no-banner --exit-code 1 --config "$gitleaks_cfg" --gitleaks-ignore-path "$work/noignore" \
+      --ignore-gitleaks-allow --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
     wip_msg="snapshot withheld, gitleaks finding: $r (gitleaks git --log-opts='$commit^!' $dst)"; return 1
   fi
   if "${g[@]}" push -q --force origin "$commit:$wip_ref" 2>"$work/err"; then
@@ -134,7 +186,7 @@ dev_tree_repos "$dev/" "$work/repos"
 tr '\0' '\n' < "$work/repos" | sed 's|/\.git$||' | sort > "$work/paths"
 is_nested() { local p="$1" q; while IFS= read -r q; do [[ "$p" == "$q"/* ]] && return 0; done < "$work/paths"; return 1; }
 
-n_ff=0 n_cur=0 n_dirty=0 n_div=0 n_noorig=0 n_fail=0 n_stuck=0
+n_ff=0 n_cur=0 n_dirty=0 n_div=0 n_noorig=0 n_fail=0 n_stuck=0 n_skip=0
 : > "$state/results.new"
 problems=()
 note() { printf '%s\t%s\n' "$1" "$2" >> "$state/results.new"; }
@@ -144,6 +196,12 @@ while IFS= read -r r; do
   g=("${git_q[@]}" -C "$dev/$r")
   if ! "${g[@]}" remote get-url origin >/dev/null 2>&1; then
     note "$r" no-origin; n_noorig=$((n_noorig + 1)); continue
+  fi
+  if ! "${g[@]}" remote get-url origin 2>/dev/null | grep -qE "$origin_re"; then
+    note "$r" foreign; n_skip=$((n_skip + 1)); problems+=("origin not on GitHub or trusted-origins, skipped: $r"); continue
+  fi
+  if bad=$(local_config_unsafe "$dev/$r"); then
+    note "$r" unsafe; n_skip=$((n_skip + 1)); problems+=("repo-local git config can run commands ($bad), skipped: $r"); continue
   fi
   own_repo "$dev/$r" && wip_fetchspec "$dev/$r"
   if ! "${g[@]}" fetch -q --prune origin </dev/null 2>"$work/err"; then
@@ -200,7 +258,7 @@ done < "$work/paths"
 
 mv "$state/results.new" "$state/results"
 status=0; (( n_stuck == 0 )) || status=5; (( n_fail == 0 )) || status=3
-summary="dev-pull: $n_ff ff, $n_cur current, $n_dirty dirty, $n_div diverged, $n_noorig no-origin, $n_fail failed, $n_stuck stuck"
+summary="dev-pull: $n_ff ff, $n_cur current, $n_dirty dirty, $n_div diverged, $n_noorig no-origin, $n_fail failed, $n_stuck stuck, $n_skip skipped"
 printf '{"finished_at":"%s","exit":%d,"summary":"%s"}\n' "$(date -u +%FT%TZ)" "$status" "$summary" > "$state/last.json"
 say "$summary"
 (( ${#problems[@]} == 0 )) || printf '  %s\n' "${problems[@]}"

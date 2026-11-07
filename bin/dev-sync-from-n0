@@ -207,13 +207,14 @@ pull_summary=$(grep -o 'dev-pull: .*' "$work/pull.out" | tail -1)
 [[ "$pull_summary" =~ \ ([1-9][0-9]*)\ stuck ]] && status=3
 while IFS= read -r line; do problems+=("${line#  }"); done < <(grep '^  ' "$work/pull.out" || true)
 
-# A repo without origin, or whose origin fetch failed, follows n0 instead.
+# A repo without origin, with an origin dev-pull does not fetch (not on GitHub), or whose
+# origin fetch failed, follows n0 instead.
 while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
   is_nested "$r" && continue
   dst="$dev/$r"; [[ -d "$dst/.git" ]] || continue
   g=("${DEV_TREE_GIT[@]}" -C "$dst")
   res=$(awk -F '\t' -v r="$r" '$1 == r {print $2}' "$HOME/.local/state/dev-pull/results" 2>/dev/null)
-  [[ "$res" == "no-origin" || "$res" == "failed" ]] || continue
+  [[ "$res" == "no-origin" || "$res" == "failed" || "$res" == "foreign" ]] || continue
   if ! "${g[@]}" fetch -q --prune n0 2>>"$work/err"; then
     problems+=("fetch from n0 failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3; continue
   fi

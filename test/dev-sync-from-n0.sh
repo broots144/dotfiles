@@ -16,6 +16,10 @@ mkdir -p "$t/n0" "$t/book"; ln -s "$t/dots" "$t/n0/.dotfiles"
 export HOME="$t/book" ZSH="$t/dots" FAKE_N0_HOME="$t/n0" PATH="$t/bin:$PATH"
 export SUBLEVEL_DIR="$t/sublevel" KUMA_URL="http://127.0.0.1:9" SOPS_AGE_KEY_FILE="$t/no-such-key"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$t"
+# Local-path upstreams (file transport) are refused unless DEV_PULL_ALLOW_FILE=1; a gh stub
+# marks every repo private so WIP snapshots are allowed.
+mkdir -p "$t/ghbin"; printf '#!/bin/sh\necho true\n' > "$t/ghbin/gh-private"; chmod +x "$t/ghbin/gh-private"
+export DEV_PULL_ALLOW_FILE=1 DEV_PULL_GH="$t/ghbin/gh-private"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 fail=0
 ok() { "$@" || { echo "FAIL: line ${BASH_LINENO[0]}: $*"; fail=1; }; }
