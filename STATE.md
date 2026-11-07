@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (security review r1 closed out: PRs #12, #13, #14 merged and deployed on n0; grade A).
+Last updated: 2026-11-07 by Claude (security review r2: N1 submodule config, N2 visibility re-check before push).
 
 ## Phases
 
@@ -76,6 +76,17 @@ Last updated: 2026-11-07 by Claude (security review r1 closed out: PRs #12, #13,
   checkout itself), so dev-pull, the bundles and the MacBook sync leave them alone.
   WIP snapshots go only to private repos (`gh api repos/X --jq .private`, cached per day in
   `~/.local/state/dev-pull/visibility`; unknown counts as public and clears an old snapshot).
+  Since review r2 (N2) the push asks gh again without the cache, so a repo made public today
+  gets no new snapshot. A snapshot already pushed becomes public with the repo: **delete
+  `refs/wip/*` on origin before making a repo public** (`git push origin --delete refs/wip/n0
+  refs/wip/book`).
+- dev-pull and submodules (review r2, N1): git never recurses into a submodule from dev-pull
+  (`fetch.recurseSubmodules=false`, `submodule.recurse=false`, `push.recurseSubmodules=no`,
+  `diff.ignoreSubmodules=all`, and `--ignore-submodules=all` on every `status`), so a
+  submodule's own config (filter, credential helper) is never read by a command that runs it.
+  `local_config_unsafe` also scans absorbed submodule configs (`.git/modules/**/config`,
+  git's own `core.worktree` there allowed) and skips the repo with `<key> in submodule <name>`.
+  Submodules are not updated by dev-pull; run `git submodule update` by hand.
   gitleaks runs with `lib/gitleaks.toml`, an empty ignore dir and `--ignore-gitleaks-allow`, so
   the scanned tree cannot switch rules off. Pinned by test/untrusted-input.sh and
   test/dev-pull-edges.sh (real gitleaks case; CI installs gitleaks). `DEV_PULL_ALLOW_FILE=1`

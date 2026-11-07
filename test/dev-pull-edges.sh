@@ -83,6 +83,16 @@ ok grep -q 'no snapshot, repo public or visibility unknown: wip' <<<"$out"
 ok [ -z "$(git -C "$t/up/wip" for-each-ref 'refs/wip/*')" ]
 ok [ "$(cat "$t/gh.calls")" = "api repos/up/wip --jq .private" ]
 rm -rf "$HOME/.local/state/dev-pull/visibility"
+# Made public today, after the cache said private (review r2, N2): the push asks gh again
+# without the cache, so no new snapshot goes up and the old one is deleted.
+out=$(wp); ok grep -q 'snapshot pushed to refs/wip/testhost: wip' <<<"$out"; ok [ -s "$rec" ]
+ok grep -q ' true$' "$HOME/.local/state/dev-pull/visibility/up__wip"
+printf 'd2\n' >> "$HOME/dev/wip/README"
+out=$(DEV_PULL_GH="$t/gh-public" wp)
+ok grep -q 'no snapshot, repo public or visibility unknown: wip' <<<"$out"
+ok [ ! -e "$rec" ]; ok [ -z "$(git -C "$t/up/wip" for-each-ref 'refs/wip/*')" ]
+ok grep -q ' false$' "$HOME/.local/state/dev-pull/visibility/up__wip"
+rm -rf "$HOME/.local/state/dev-pull/visibility"
 
 # gitleaks gets this repo's config, an empty ignore dir and --ignore-gitleaks-allow, so the
 # dirty tree it scans cannot switch its rules off.
