@@ -1,0 +1,43 @@
+#!/bin/bash
+# Gate for P8 (herdr on n0): pinned version, Claude integration, server under launchd,
+# socket answering, socket and directory modes. Run on n0: `just verify-phase-8`.
+set -u
+cd "$(dirname "$0")/.." || exit 1
+bad=0
+ok()   { echo "ok   $*"; }
+nope() { echo "FAIL $*"; bad=1; }
+
+pin="$(cat herdr/VERSION)"
+have="$(herdr --version 2>/dev/null | awk '{print $2}')"
+[[ "$have" == "$pin" ]] && ok "herdr $have (pin herdr/VERSION $pin)" || nope "herdr '$have' is not the pin $pin"
+brew list --pinned 2>/dev/null | grep -qx herdr && ok "brew pin herdr" || nope "herdr is not brew-pinned"
+
+line="$(herdr integration status 2>/dev/null | grep '^claude:')"
+[[ "$line" == "claude: current"* ]] && ok "integration $line" || nope "integration: '$line'"
+hook="$HOME/.claude/hooks/herdr-agent-state.sh"
+n="$(grep -c "herdr-agent-state.sh' session" "$HOME/.claude/settings.json" 2>/dev/null || true)"
+[[ "$n" == 1 ]] && ok "settings.json has 1 herdr SessionStart hook; hook sha256 $(shasum -a 256 "$hook" | cut -c1-16)" \
+  || nope "settings.json has $n herdr hook entries"
+
+label=com.broots.herdr-server
+state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tstate =/{print $2; exit}')"
+[[ "$state" == running ]] && ok "launchd $label: running" || nope "launchd $label: '${state:-not loaded}'"
+
+status="$(herdr status server 2>/dev/null)"
+grep -q '^ *status: running' <<<"$status" && ok "server running" || nope "server: $(head -1 <<<"$status")"
+reply="$(herdr workspace list 2>/dev/null)"
+[[ "$reply" == *'"type":"workspace_list"'* ]] && ok "API socket answers (workspace.list)" || nope "API socket: '${reply:0:80}'"
+
+dir="$HOME/.config/herdr"
+m="$(stat -f '%Lp %Su' "$dir")"
+[[ "$m" == "700 $(id -un)" ]] && ok "$dir mode 700, owner me" || nope "$dir is '$m'"
+for s in herdr.sock herdr-client.sock; do
+  m="$(stat -f '%HT %Lp %Su' "$dir/$s" 2>/dev/null)"
+  [[ "$m" == "Socket 600 $(id -un)" ]] && ok "$s: socket 600, owner me" || nope "$s: '$m'"
+done
+[[ "$(readlink "$dir/config.toml")" == "$HOME/.dotfiles/herdr/config.toml" ]] && ok "config.toml linked to dotfiles" \
+  || nope "config.toml is not the dotfiles link"
+herdr config check >/dev/null 2>&1 && ok "herdr config check" || nope "herdr config check"
+
+(( bad )) && { echo "verify-phase-8 FAILED"; exit 1; }
+echo "verify-phase-8 ok"
