@@ -85,6 +85,9 @@ echo canary > "$root/escape-canary"
 # An evicted package directory in the mirror fails stat itself (2026-11-07 17:34Z, exit 23:
 # "ClaudeGlance.xcodeproj/xcshareddata: fstatat: Resource deadlock avoided").
 mkdir -p "$root/dev/notes/App.xcodeproj/xcshareddata"
+# Under launchd the children of an evicted (dataless) mirror directory cannot even be stat'ed,
+# so the reported path does not "exist": the nearest evicted ancestor inside the mirror goes.
+mkdir -p "$root/dev/notes/Evicted.xcodeproj"; chflags hidden "$root/dev/notes/Evicted.xcodeproj"
 cat > "$t/rsync-once" <<EOF
 #!/bin/sh
 n=\$(cat "$t/rsync.n" 2>/dev/null || echo 0); echo \$((n + 1)) > "$t/rsync.n"
@@ -92,13 +95,17 @@ if [ "\$n" -lt "\${FAILS:-1}" ]; then
   echo "rsync(1): error: notes/.build/App.app: unlinkat: Directory not empty" >&2
   echo "rsync(1): error: notes/a.txt: mmap: Resource deadlock avoided" >&2
   echo "rsync(1): error: notes/App.xcodeproj/xcshareddata: fstatat: Resource deadlock avoided" >&2
+  echo "rsync(1): error: notes/Evicted.xcodeproj/sub/gone.txt: fstatat: Resource deadlock avoided" >&2
+  echo "rsync(1): error: notes/plain-missing/x: fstatat: Resource deadlock avoided" >&2
   echo "rsync(1): error: ../escape-canary: unlinkat: Directory not empty" >&2
   echo "rsync(0): error: unexpected end of file" >&2; exit 1
 fi
 exec /usr/bin/rsync "\$@"
 EOF
 chmod +x "$t/rsync-once"
-rm -f "$t/rsync.n"; DEV_BACKUP_RSYNC="$t/rsync-once" run
+rm -f "$t/rsync.n"; mkdir -p "$root/dev/notes/plain-missing"; DEV_BACKUP_EVICTED_FLAG=hidden DEV_BACKUP_RSYNC="$t/rsync-once" run
+ok grep -q 'removed notes/Evicted.xcodeproj from the mirror' <<<"$out"
+ok bash -c '! grep -q "removed notes/plain-missing from the mirror" <<<"$1"' _ "$out"   # not evicted: left alone
 ok [ "$rc" = 0 ]; ok [ "$(cat "$t/rsync.n")" = 2 ]
 ok grep -q 'removed notes/.build/App.app from the mirror' <<<"$out"; ok grep -q 'removed notes/App.xcodeproj/xcshareddata from the mirror' <<<"$out"; ok grep -q 'retrying the mirror (attempt 2 of 3)' <<<"$out"
 ok [ ! -e "$root/dev/notes/.build" ]; ok [ -f "$root/dev/notes/a.txt" ]; ok [ -f "$root/escape-canary" ]
