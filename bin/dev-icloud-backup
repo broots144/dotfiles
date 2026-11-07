@@ -175,6 +175,28 @@ icloud_fix() {  # <rsync stderr>: removes the mirror paths rsync choked on; fals
   done < <(sed -nE 's/^rsync(\([0-9]+\))?: error: (.*): (unlinkat: Directory not empty|(open|mmap|read|unlink|rename)[a-z]*: Resource deadlock avoided)$/\2/p' "$1")
   (( n > 0 ))
 }
+# An evicted mirror file (dataless, Optimize Mac Storage) that rsync would update has to be
+# read back first, and that read is what fails with EDEADLK under launchd, one file per run
+# (2026-11-07: 54k evicted files in the mirror). So before rsync, every evicted mirror file whose
+# size or mtime differs from ~/dev (or that ~/dev no longer has) is removed: rsync then writes
+# it fresh or has nothing to delete. Unchanged evicted files are left alone (rsync's quick check
+# skips them without reading). DEV_BACKUP_EVICTED_FLAG is for the tests (a flag they can set).
+evicted_flag="${DEV_BACKUP_EVICTED_FLAG:-dataless}"
+icloud_drop_stale_evicted() {
+  local n=0 p
+  [[ -d "$dst" ]] || return 0
+  { (cd "$dst" && find . -flags "+$evicted_flag" -type f -print0) || true; } > "$work/evicted"
+  [[ -s "$work/evicted" ]] || return 0
+  { (cd "$dst" && xargs -0 stat -f '%z %m %N' < "$work/evicted") || true; } > "$work/evicted.dst"
+  { (cd "$src" && xargs -0 stat -f '%z %m %N' < "$work/evicted" 2>/dev/null) || true; } > "$work/evicted.src"
+  while IFS= read -r p; do
+    p="${p#* }"; p="${p#* }"; p="${p#./}"
+    [[ -n "$p" && "$p" != *..* && -f "$dst$p" ]] || continue
+    rm -f -- "${dst:?}$p" && n=$((n + 1))
+  done < <(awk 'FILENAME == ARGV[1] { s[$0] = 1; next } !($0 in s)' "$work/evicted.src" "$work/evicted.dst")
+  (( n == 0 )) || echo "$(date -u +%FT%TZ) removed $n evicted mirror file(s) that changed or went from ~/dev"
+}
+(( ${#dry[@]} )) || icloud_drop_stale_evicted
 for attempt in 1 2 3; do
   rc=0
   "$rsync_bin" -a -W --delete --delete-excluded ${dry[@]+"${dry[@]}"} "${args[@]}" \
