@@ -54,6 +54,12 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   every evicted (dataless) mirror file whose size or mtime differs from ~/dev, or that ~/dev no
   longer has, is removed; rsync writes it fresh. `DEV_BACKUP_EVICTED_FLAG` is the test hook.
   `DEV_BACKUP_RSYNC` exists for the tests (test/dev-icloud-backup-edges.sh).
+- iCloud backup, review r3 (N2): a file listed by the scan but gone by the time tar runs
+  (Night Shift writes under ~/dev during the 08:46Z run) no longer discards the encrypted
+  archive. bsdtar's exit 1 counts as success when every stderr line is "Cannot stat: No such
+  file or directory"; the log line says `N gone since the scan`. Any other tar error, or age
+  failing, still ends in status 4 with the previous archive kept. `DEV_BACKUP_TAR` is the test
+  hook (test/dev-icloud-backup-edges.sh).
 - ~/dev sync: GitHub is the hub (sublevel ADR-071). `bin/dev-pull` fast-forwards clean checkouts,
   never resets; untracked files no longer block a fast-forward and a checkout stuck for a day fails
   the run (dc1137d). `bin/dev-sync-from-n0` pulls repos plus private files to the laptop and renders
@@ -101,6 +107,9 @@ Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 
   diffs with `--no-renames`, so an identical untracked copy of a file renamed into place no
   longer blocks the fast-forward. Pinned by test/untrusted-input.sh and test/dev-pull.sh.
 - node/install.sh (`sudo npm install spoof -g`, unpinned, as root) deleted (L1).
+- dev-sync-from-n0 (review r3, N3): each clone, fetch, merge and rsync writes its own stderr
+  file, so one repo blocked by untracked files no longer makes every later diverged repo read
+  "untracked files block" (pinned by test/dev-sync-from-n0.sh).
 - dev-sync-from-n0's run lock is a symlink `lock.pid -> <pid>` (atomic; pid checked to be a
   sync process); a stale lock is removed only if it still names the stale pid, the exit trap
   removes it only while it names this run, and a live run of the old mkdir-lock version makes

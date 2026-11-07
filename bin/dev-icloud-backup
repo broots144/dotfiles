@@ -88,6 +88,27 @@ keys="$HOME/.config/sops/age/keys.txt"
 cache="$HOME/.local/state/dev-icloud-backup/git"
 recipient=$( { sed -n 's/^# public key: //p' "$keys" 2>/dev/null || true; } | head -1)
 age=$(command -v age || echo /opt/homebrew/bin/age)
+# The archive: tar of the listed files into age. Minutes pass between the scan and tar, and
+# Night Shift writes under ~/dev meanwhile, so a listed file can be gone by then; bsdtar then
+# exits 1 ("Cannot stat: No such file or directory") and the whole archive was discarded
+# (review r3, N2). That case alone counts as success (the file is simply not in tonight's
+# archive); any other tar error, or age failing, still fails. Sets `vanished`.
+# DEV_BACKUP_TAR is for the tests.
+tar_bin="${DEV_BACKUP_TAR:-tar}"
+tar_archive() {  # <list> <out>
+  local rc_t rc_a
+  vanished=0
+  "$tar_bin" --null -czf - -C "$src" -T "$1" 2>"$work/tar.err" | "$age" -r "$recipient" -o "$2"
+  rc_t=${PIPESTATUS[0]} rc_a=${PIPESTATUS[1]}
+  (( rc_a == 0 )) || return 1
+  (( rc_t == 0 )) && return 0
+  (( rc_t == 1 )) || { head -5 "$work/tar.err" >&2; return 1; }
+  if grep -v -e ': Cannot stat: No such file or directory$' -e '^tar: Error exit delayed from previous errors\.$' "$work/tar.err" | grep -q .; then
+    head -5 "$work/tar.err" >&2; return 1
+  fi
+  vanished=$(grep -c ': Cannot stat: No such file or directory$' "$work/tar.err" || true)
+  return 0
+}
 
 if [[ ${#dry[@]} -gt 0 ]]; then
   :
@@ -103,10 +124,11 @@ else
   if (( n == 0 )); then
     echo "$(date -u +%FT%TZ) no secret files found; keeping the previous archive" >&2
     status=4
-  elif tar --null -czf - -C "$src" -T "$work/list" | "$age" -r "$recipient" -o "$tmp" \
+  elif tar_archive "$work/list" "$tmp" \
       && mv -f "$tmp" "$root/dev-secrets.tar.age" \
       && cp -f "$root/dev-secrets.tar.age" "$hist/dev-secrets-$(date +%F).tar.age"; then
-    echo "$(date -u +%FT%TZ) archived $n secret files (encrypted)"
+    gone=""; (( vanished == 0 )) || gone=", $vanished gone since the scan"
+    echo "$(date -u +%FT%TZ) archived $n secret files (encrypted)$gone"
     # Keep two weeks of generations: one bad night must not leave only a bad archive.
     ls -1t "$hist"/dev-secrets-*.tar.age 2>/dev/null | tail -n +15 | while IFS= read -r old; do rm -f "$old"; done
   else

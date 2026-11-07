@@ -120,5 +120,25 @@ ok bash -c '/bin/ls -lO "$1" | grep -q hidden' _ "$root/dev/notes/same.txt"   # 
 chflags hidden "$root/dev/notes/changed.txt"; rm -rf "$HOME/dev/notes/changed.txt" "$HOME/dev/notes/same.txt"
 DEV_BACKUP_EVICTED_FLAG=hidden run; ok [ "$rc" = 0 ]; ok grep -q 'removed 2 evicted mirror file(s)' <<<"$out"
 
+# A listed file that is gone by the time tar runs (Night Shift writes under ~/dev during the
+# run) is left out of the archive, not fatal (review r3, N2): bsdtar exits 1 with "Cannot
+# stat", the archive is still written. Any other tar error still fails the archive (status 4)
+# and keeps the previous one.
+printf 'S=1\n' > "$HOME/dev/notes/.env"; printf 'S=2\n' > "$HOME/dev/notes/vanish.env"
+cat > "$t/tar-vanish" <<EOF
+#!/bin/sh
+rm -f "$HOME/dev/notes/vanish.env"; exec tar "\$@"
+EOF
+printf '#!/bin/sh\necho "tar: notes/.env: Cannot open: Permission denied" >&2; echo "tar: Error exit delayed from previous errors." >&2; exit 1\n' > "$t/tar-denied"
+chmod +x "$t/tar-vanish" "$t/tar-denied"
+rm -f "$root/dev-secrets.tar.age"
+DEV_BACKUP_TAR="$t/tar-vanish" run; ok [ "$rc" = 0 ]; ok grep -q 'secret files (encrypted), 1 gone since the scan' <<<"$out"
+ok grep -q '"exit":0' "$root/LAST_RUN.json"
+ok bash -c 'age -d -i "$1" "$2" | tar -tzf - | grep -qx notes/.env' _ "$keys" "$root/dev-secrets.tar.age"
+cp "$root/dev-secrets.tar.age" "$t/archive.before"; printf 'S=3\n' > "$HOME/dev/notes/vanish.env"
+DEV_BACKUP_TAR="$t/tar-denied" run; ok [ "$rc" = 4 ]; ok grep -q 'secret archive failed' <<<"$out"
+ok grep -q 'Permission denied' <<<"$out"; ok cmp -s "$t/archive.before" "$root/dev-secrets.tar.age"
+ok [ ! -e "$root/.dev-secrets.tar.age.tmp" ]
+
 (( fail == 0 )) && echo "ok dev-icloud-backup-edges"
 exit "$fail"

@@ -172,14 +172,14 @@ while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
   dst="$dev/$r"
   if [[ ! -d "$dst/.git" ]]; then
     if (( dry )); then say "would clone $r"; repos_cloned=$((repos_cloned + 1)); continue; fi
-    if [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" clone -q "$(ssh_url "$origin")" "$dst" 2>>"$work/err"; then
+    if [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" clone -q "$(ssh_url "$origin")" "$dst" 2>"$work/err-clone"; then
       "${DEV_TREE_GIT[@]}" -C "$dst" remote add n0 "n0:dev/$r"
       say "cloned $r from origin"; repos_cloned=$((repos_cloned + 1))
-    elif "${DEV_TREE_GIT[@]}" clone -q --origin n0 "n0:dev/$r" "$dst" 2>>"$work/err"; then
+    elif "${DEV_TREE_GIT[@]}" clone -q --origin n0 "n0:dev/$r" "$dst" 2>"$work/err-clone"; then
       [[ -n "$origin" ]] && "${DEV_TREE_GIT[@]}" -C "$dst" remote add origin "$(ssh_url "$origin")"
       say "cloned $r from n0"; repos_cloned=$((repos_cloned + 1))
     else
-      problems+=("clone failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3
+      problems+=("clone failed: $r ($(tail -1 "$work/err-clone" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3
       continue
     fi
     "${DEV_TREE_GIT[@]}" -C "$dst" config remote.pushDefault origin
@@ -208,15 +208,17 @@ pull_summary=$(grep -o 'dev-pull: .*' "$work/pull.out" | tail -1)
 while IFS= read -r line; do problems+=("${line#  }"); done < <(grep '^  ' "$work/pull.out" || true)
 
 # A repo without origin, with an origin dev-pull does not fetch (not on GitHub), or whose
-# origin fetch failed, follows n0 instead.
+# origin fetch failed, follows n0 instead. Each fetch and merge writes its own stderr file
+# (overwritten per repo): one accumulated file made every later diverged repo read
+# "untracked files block" after one repo had hit that (review r3, N3).
 while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
   is_nested "$r" && continue
   dst="$dev/$r"; [[ -d "$dst/.git" ]] || continue
   g=("${DEV_TREE_GIT[@]}" -C "$dst")
   res=$(awk -F '\t' -v r="$r" '$1 == r {print $2}' "$HOME/.local/state/dev-pull/results" 2>/dev/null)
   [[ "$res" == "no-origin" || "$res" == "failed" || "$res" == "foreign" ]] || continue
-  if ! "${g[@]}" fetch -q --prune n0 2>>"$work/err"; then
-    problems+=("fetch from n0 failed: $r ($(tail -1 "$work/err" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3; continue
+  if ! "${g[@]}" fetch -q --prune n0 2>"$work/err-fetch"; then
+    problems+=("fetch from n0 failed: $r ($(tail -1 "$work/err-fetch" 2>/dev/null))"); repos_failed=$((repos_failed + 1)); status=3; continue
   fi
   b=$("${g[@]}" symbolic-ref --short -q HEAD || true)
   [[ -n "$b" ]] || continue
@@ -225,9 +227,9 @@ while IFS= read -r -d '' r && IFS= read -r -d '' origin; do
   n=$("${g[@]}" rev-list --count "HEAD..n0/$b" 2>/dev/null || echo 0)
   [[ "$n" == "0" ]] && continue
   if (( dry )); then say "would fast-forward $r from n0 ($n commits)"; repos_n0ff=$((repos_n0ff + 1)); continue; fi
-  if "${g[@]}" merge -q --ff-only "n0/$b" 2>>"$work/err"; then
+  if "${g[@]}" merge -q --ff-only "n0/$b" 2>"$work/err-merge"; then
     say "fast-forwarded $r from n0 ($n commits)"; repos_n0ff=$((repos_n0ff + 1))
-  elif grep -q 'untracked working tree files would be overwritten' "$work/err"; then
+  elif grep -q 'untracked working tree files would be overwritten' "$work/err-merge"; then
     problems+=("untracked files block fast-forward from n0/$b: $r")
   else
     problems+=("diverged from n0/$b, fetch only: $r")
@@ -250,11 +252,11 @@ n_list=$(tr -cd '\0' < "$work/list" | wc -c | tr -d ' ')
 rs=(/usr/bin/rsync -a -r -0 --files-from="$work/list" --out-format=%n -e "$ssh_bin -o BatchMode=yes -o ConnectTimeout=10")
 # Dry run without --update lists every file n0 has changed; the real run with --update skips
 # the ones newer here. The difference is what diverged on this side (dev-push-to-n0 carries it back).
-/usr/bin/rsync -n "${rs[@]:1}" n0:dev/ "$dev/" > "$work/would" 2>>"$work/err" || true
+/usr/bin/rsync -n "${rs[@]:1}" n0:dev/ "$dev/" > "$work/would" 2>"$work/err-rsync-n" || true
 if (( dry )); then
   cp "$work/would" "$work/did"
 else
-  "${rs[@]}" -u n0:dev/ "$dev/" > "$work/did" 2>>"$work/err" || { status=4; problems+=("rsync failed: $(tail -1 "$work/err" 2>/dev/null)"); }
+  "${rs[@]}" -u n0:dev/ "$dev/" > "$work/did" 2>"$work/err-rsync" || { status=4; problems+=("rsync failed: $(tail -1 "$work/err-rsync" 2>/dev/null)"); }
 fi
 grep -v '/$' "$work/did" > "$work/did-files" || true
 grep -v '/$' "$work/would" > "$work/would-files" || true
