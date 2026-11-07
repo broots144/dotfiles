@@ -96,6 +96,19 @@ ok grep -q 'diverged from n0/main, fetch only: solo' <<<"$out"
 ok [ "$(git -C "$bk/solo" log -1 --format=%s)" = mine ]
 git -C "$bk/solo" reset -q --hard n0/main
 
+# Each repo's fast-forward failure is reported for that repo (review r3, N3): one repo whose
+# untracked file blocks the merge must not make later diverged repos read "untracked files
+# block", whatever order the repos come in.
+repo "$n0/blk"; for d in d1 d2 d3 d4; do repo "$n0/$d"; done
+sync >/dev/null || true
+printf 'theirs\n' > "$n0/blk/new.txt"; git -C "$n0/blk" add new.txt; git -C "$n0/blk" commit -qm add
+printf 'mine\n' > "$bk/blk/new.txt"
+for d in d1 d2 d3 d4; do commit "$n0/$d" theirs; commit "$bk/$d" mine; done
+out=$(sync) || true
+ok grep -q 'untracked files block fast-forward from n0/main: blk' <<<"$out"
+for d in d1 d2 d3 d4; do ok grep -q "diverged from n0/main, fetch only: $d" <<<"$out"; done
+rm -rf "$n0/blk" "$bk/blk"; for d in d1 d2 d3 d4; do rm -rf "${n0:?}/$d" "${bk:?}/$d"; done
+
 # A checkout behind origin that cannot fast-forward (edits) is stuck at once with
 # DEV_PULL_STUCK_HOURS=0: the run fails (exit 3) and last.json says down.
 git clone -q "$t/up/hub.git" "$t/hub2"; commit "$t/hub2" upstream; git -C "$t/hub2" push -q origin main
