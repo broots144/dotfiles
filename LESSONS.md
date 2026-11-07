@@ -2,6 +2,8 @@
 
 One line per lesson, newest first.
 
+- 2026-11-07: The ignored-file scan found checkouts with `find -name .git -type d`, so git worktrees and submodules (a `.git` file) were never scanned and their gitignored files reached the plaintext mirror. Rule: enumerate working trees by `.git` of either type; keep `-type d` only where an object store is needed (bundles, .git/config).
+- 2026-11-07: macOS openrsync cannot delete an excluded package directory (.app, .bundle) held in iCloud Drive and aborts the whole transfer on one evicted file (EDEADLK). Rule: after an rsync failure into iCloud, remove the paths it named with rm and run it again, bounded.
 - 2026-11-06: install-launchd.sh matched host markers with `grep -w`, and '-' is not a word character, so host n0 matched a marker naming n0-2 (the Bonjour rename of 2026-10-28). Rule: match host names as whole space-separated tokens, never with grep -w or a regex.
 - 2026-11-06: The iCloud mirror skipped gitignored directories entirely, so their contents (TV tokens, private/ dirs) went to iCloud in plaintext; and under `set -e` one failed probe or iCloud write ended the backup silently. Rules: default-deny means every gitignored path gets an exclude rule, whatever its size or type; a backup script's probes and writes into iCloud must fail into a status code, never into an abort.
 - 2026-11-06: The nightly iCloud backup on n0 died on "Resource deadlock avoided" writing a small `.refs` file into iCloud Drive. The iCloud file provider can refuse a write transiently; any write into iCloud Drive needs to tolerate a retry, and one failed file must not abort the whole run. (Open in STATE.md.)

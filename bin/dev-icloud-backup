@@ -156,7 +156,34 @@ else
 fi
 
 # --delete-excluded also removes .git directories and secret files an older run mirrored.
-/usr/bin/rsync -a --delete --delete-excluded ${dry[@]+"${dry[@]}"} "${args[@]}" \
-  --from0 --exclude-from="$work/rules" "$src" "$dst" || { s=$?; [[ $status -eq 0 ]] && status=$s; }
+# -W: no delta transfer, so rsync never reads the mirror's copy of a changed file.
+# Two iCloud Drive failures made openrsync give up (2026-11-07, exit 1, mirror left partial):
+#   - "<dir>: unlinkat: Directory not empty": it cannot delete an excluded directory that iCloud
+#     holds as a package (.app, .bundle, .xcodeproj under .build/); rm -rf can.
+#   - "<file>: mmap: Resource deadlock avoided" (EDEADLK): the mirror's copy is evicted and
+#     could not be read back; it is only a stale copy of a file in ~/dev, so it is removed.
+# Each such path is fixed and rsync runs again, up to three times; then its status stands.
+# DEV_BACKUP_RSYNC is for the tests.
+rsync_bin="${DEV_BACKUP_RSYNC:-/usr/bin/rsync}"
+icloud_fix() {  # <rsync stderr>: removes the mirror paths rsync choked on; false if none
+  local p n=0
+  while IFS= read -r p; do
+    # Relative to the mirror, never above it.
+    [[ -n "$p" && "$p" != /* && "$p" != .. && "$p" != ../* && "$p" != */.. && "$p" != */../* ]] || continue
+    [[ -e "$dst$p" || -L "$dst$p" ]] || continue
+    rm -rf -- "${dst:?}$p" && n=$((n + 1)) && echo "$(date -u +%FT%TZ) removed $p from the mirror (iCloud refused rsync)"
+  done < <(sed -nE 's/^rsync(\([0-9]+\))?: error: (.*): (unlinkat: Directory not empty|(open|mmap|read|unlink|rename)[a-z]*: Resource deadlock avoided)$/\2/p' "$1")
+  (( n > 0 ))
+}
+for attempt in 1 2 3; do
+  rc=0
+  "$rsync_bin" -a -W --delete --delete-excluded ${dry[@]+"${dry[@]}"} "${args[@]}" \
+    --from0 --exclude-from="$work/rules" "$src" "$dst" 2>"$work/rsync.err" || rc=$?
+  cat "$work/rsync.err" >&2
+  (( rc != 0 && ${#dry[@]} == 0 && attempt < 3 )) || break
+  icloud_fix "$work/rsync.err" || break
+  echo "$(date -u +%FT%TZ) rsync exit $rc; retrying the mirror (attempt $((attempt + 1)) of 3)"
+done
+(( rc == 0 )) || { [[ $status -eq 0 ]] && status=$rc; }
 
 finish

@@ -42,5 +42,68 @@ ok [ -s "$root/git/good.bundle.age" ]; ok [ ! -e "$root/git/bad.bundle.age" ]; o
 ok [ -s "$root/dev-secrets.tar.age" ]; ok [ -f "$root/dev/notes/b.txt" ]; ok [ ! -e "$root/dev/notes/.env" ]
 ok grep -q '"exit":5' "$root/LAST_RUN.json"
 
+# Worktrees and submodules have a .git file, not a .git dir: their gitignored files must stay
+# out of the plaintext mirror too (a worktree's private/pairing.txt was copied, 2026-11-07),
+# go into the archive, and stay out of the MacBook sync manifest. A worktree git cannot read
+# (its main repo moved) is left out of the mirror whole.
+rm -rf "$HOME/dev/bad"
+m="$HOME/dev/main"; git init -q -b main "$m"; printf 'private/\n*.log\n' > "$m/.gitignore"; echo r > "$m/README"
+git -C "$m" add .; git -C "$m" commit -qm init
+mkdir -p "$m/private"; echo pin > "$m/private/pairing.txt"
+git -C "$m" worktree add -q -b br "$HOME/dev/_wt/main/br"
+w="$HOME/dev/_wt/main/br"; mkdir -p "$w/private" "$w/cdk.out"; echo pin2 > "$w/private/pairing.txt"; echo l > "$w/run.log"
+printf 'cdk.out/\n' >> "$w/.gitignore"; echo c > "$w/cdk.out/tpl.json"; echo ok > "$w/plain.txt"
+git init -q -b main "$t/subsrc"; printf 'cache/\nlocal.txt\n' > "$t/subsrc/.gitignore"; git -C "$t/subsrc" add .; git -C "$t/subsrc" commit -qm s
+git init -q -b main "$HOME/dev/sup"; git -C "$HOME/dev/sup" -c protocol.file.allow=always submodule -q add "$t/subsrc" sub
+git -C "$HOME/dev/sup" commit -qm sub; mkdir -p "$HOME/dev/sup/sub/cache"
+echo k > "$HOME/dev/sup/sub/cache/k.txt"; echo k2 > "$HOME/dev/sup/sub/local.txt"
+git -C "$m" worktree add -q -b gone "$HOME/dev/_wt/main/gone"; echo g > "$HOME/dev/_wt/main/gone/notes.txt"
+printf 'gitdir: %s/nowhere\n' "$t" > "$HOME/dev/_wt/main/gone/.git"
+run; ok [ "$rc" = 0 ]
+for f in main/private _wt/main/br/private/pairing.txt _wt/main/br/run.log _wt/main/br/cdk.out sup/sub/cache sup/sub/local.txt _wt/main/gone; do
+  ok [ ! -e "$root/dev/$f" ]
+done
+ok [ -f "$root/dev/_wt/main/br/plain.txt" ]; ok [ -f "$root/dev/sup/sub/.gitignore" ]
+listed=$(age -d -i "$keys" "$root/dev-secrets.tar.age" | tar -tzf -)
+for f in main/private/pairing.txt _wt/main/br/private/pairing.txt _wt/main/br/run.log sup/sub/cache/k.txt sup/sub/local.txt _wt/main/gone/notes.txt; do
+  ok grep -qxF "$f" <<<"$listed"
+done
+ok bash -c '! grep -q "cdk.out" <<<"$1"' _ "$listed"
+. "$here/lib/dev-tree.sh"; mkdir "$t/w"; dev_tree_lists "$HOME/dev/" "$t/w"
+man=$(dev_tree_private_files "$HOME/dev/" "$t/w" | tr '\0' '\n')
+ok bash -c '! grep -q "^_wt/\|^sup/sub/" <<<"$1"' _ "$man"
+rm -rf "$HOME/dev/_wt/main/gone"; git -C "$m" worktree prune
+
+# iCloud refusals (2026-11-07): openrsync cannot delete an excluded package directory in iCloud
+# ("unlinkat: Directory not empty") and gives up on an evicted mirror file (EDEADLK). Those
+# mirror paths are removed and rsync runs again (at most three runs, and only while there is
+# something to remove); a path that leaves the mirror is ignored; a failure that stays is the
+# exit status. .build/ is never mirrored.
+mkdir -p "$HOME/dev/notes/.build/App.app" "$root/dev/notes/.build/App.app/Contents"
+echo b > "$HOME/dev/notes/.build/App.app/x"; echo b > "$root/dev/notes/.build/App.app/Contents/Info.plist"
+echo canary > "$root/escape-canary"
+cat > "$t/rsync-once" <<EOF
+#!/bin/sh
+n=\$(cat "$t/rsync.n" 2>/dev/null || echo 0); echo \$((n + 1)) > "$t/rsync.n"
+if [ "\$n" -lt "\${FAILS:-1}" ]; then
+  echo "rsync(1): error: notes/.build/App.app: unlinkat: Directory not empty" >&2
+  echo "rsync(1): error: notes/a.txt: mmap: Resource deadlock avoided" >&2
+  echo "rsync(1): error: ../escape-canary: unlinkat: Directory not empty" >&2
+  echo "rsync(0): error: unexpected end of file" >&2; exit 1
+fi
+exec /usr/bin/rsync "\$@"
+EOF
+chmod +x "$t/rsync-once"
+rm -f "$t/rsync.n"; DEV_BACKUP_RSYNC="$t/rsync-once" run
+ok [ "$rc" = 0 ]; ok [ "$(cat "$t/rsync.n")" = 2 ]
+ok grep -q 'removed notes/.build/App.app from the mirror' <<<"$out"; ok grep -q 'retrying the mirror (attempt 2 of 3)' <<<"$out"
+ok [ ! -e "$root/dev/notes/.build" ]; ok [ -f "$root/dev/notes/a.txt" ]; ok [ -f "$root/escape-canary" ]
+ok grep -q '"exit":0' "$root/LAST_RUN.json"
+mkdir -p "$root/dev/notes/.build/App.app"; rm -f "$t/rsync.n"
+FAILS=9 DEV_BACKUP_RSYNC="$t/rsync-once" run
+ok [ "$rc" = 1 ]; ok [ "$(cat "$t/rsync.n")" = 2 ]   # nothing left to fix: no third run; ok grep -q '"exit":1' "$root/LAST_RUN.json"
+printf '#!/bin/sh\necho "rsync: error: something else" >&2; exit 23\n' > "$t/rsync-other"; chmod +x "$t/rsync-other"
+DEV_BACKUP_RSYNC="$t/rsync-other" run; ok [ "$rc" = 23 ]; ok bash -c '! grep -q retrying <<<"$1"' _ "$out"
+
 (( fail == 0 )) && echo "ok dev-icloud-backup-edges"
 exit "$fail"
