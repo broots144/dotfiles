@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (security review r2: N1 submodule config, N2 visibility re-check before push).
+Last updated: 2026-11-07 by Claude (security review r2 closed out: PRs #16, #17 merged and deployed on n0; grade A).
 
 ## Phases
 
@@ -98,10 +98,10 @@ Last updated: 2026-11-07 by Claude (security review r2: N1 submodule config, N2 
   the new one skip. dev-push-to-n0 exits 4 when an rsync comparison fails (rsync 23/24, a file
   vanished, are reported and not fatal). A local refs cache entry is seeded once from a matching
   iCloud `.refs`, which is then removed.
-- Tests: `script/test` runs 14 regression tests (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
+- Tests: `script/test` runs 15 regression tests (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
   `brew-wrapper`, `check-state`, `dev-icloud-backup`, `dev-icloud-backup-edges`, `dev-pull`,
   `dev-pull-edges`, `dev-push-to-n0`, `dev-sync-from-n0`, `dev-sync-lock`, `install-launchd`,
-  `untrusted-input`); all pass on n0 2026-11-06 under Homebrew bash and under /bin/bash 3.2.
+  `untrusted-input`, `workflow-pinning`); all pass on n0 2026-11-07 under /bin/bash 3.2.
   The MacBook sync tests reach a fake n0 (a directory) through an ssh stub
   (`test/lib/fake-n0.sh`), passed as `DEV_SYNC_SSH` so a Homebrew ssh ahead in PATH cannot
   shadow it and reach the real n0; GitHub is unreachable in them; brew, mas, scutil, launchctl and
@@ -116,6 +116,12 @@ Last updated: 2026-11-07 by Claude (security review r2: N1 submodule config, N2 
 - install-launchd.sh matches the `dotfiles-hosts` marker on whole names: `grep -w n0` also matched
   a marker naming `n0-2` (fixed on this branch, pinned by `test/install-launchd.sh`).
 - `state-guard.yml` uses `actions/checkout` v7.0.1, SHA pinned (PR #9, 2026-11-06).
+- Actions supply chain (review r2, L3): the repo setting `sha_pinning_required` is true (set
+  2026-11-07 with `gh api -X PUT repos/broots144/dotfiles/actions/permissions`), so GitHub
+  refuses a workflow that uses an action by tag. `.github/dependabot.yml` updates the
+  github-actions pins weekly, grouped, with the `deps:` prefix that state-guard exempts; n0's
+  hourly merger (sublevel ADR-089) merges them when green. `test/workflow-pinning.sh` checks
+  both in the suite.
 - `script/check-state` skips merge commits (`git log --no-merges`), so the chore:/deps:/brew:
   exemption now works on PRs, where HEAD is GitHub's synthetic merge commit (PR #9, self-tested).
 - `.github/workflows/state-guard.yml` checks PRs only; `tests.yml` also runs on pushes to master
@@ -139,18 +145,24 @@ verify-phase-6 ok
 
 ## Security grade
 
-Current grade: **A** (security review 2026-11-07 r1; rubric: A = no open Medium or higher and
-every open Low documented with a reason).
+Current grade: **A** (security review 2026-11-07 r2; rubric: A = no open Medium or higher and
+every open Low documented with a reason; A+ also needs no open finding above Informational).
 
-- Fixed and deployed on n0 2026-11-07: F1 dev-pull ran repo-local git config (PR #12), F3 WIP
+- r2, fixed and deployed on n0 2026-11-07: N1 (Medium) dev-pull ran a submodule's repo-local
+  config through status and fetch (PR #16), N2 (Low) the visibility cache let a repo made public
+  get snapshots for up to a day (PR #16), L3 (Low) Actions pinning not enforced and not updated
+  (PR #17 plus the repo setting `sha_pinning_required=true`).
+- r2 verified live: dev-pull via launchctl kickstart 2026-11-07 15:41Z exit 0, `0 skipped`,
+  `workshop144/periphery` (has a submodule) `current`; `gh api .../actions/permissions` shows
+  `sha_pinning_required: true`.
+- r1, fixed and deployed on n0 2026-11-07: F1 dev-pull ran repo-local git config (PR #12), F3 WIP
   snapshots to public repos (PR #12), L1 `sudo npm install spoof -g` (PR #12), F2 worktree and
   submodule ignored files in the plaintext mirror (PR #13), L4 nightly backup failing (PR #13,
-  #14).
-- Verified live: dev-pull run via launchctl kickstart exit 0, `0 skipped` (the self-hosted forge
-  is in n0's local trusted-origins file); dev-icloud-backup run 2026-11-07 14:27Z exit 0 (removed
-  2,127 stale evicted mirror files, no rsync errors); every exclude rule path, including
+  #14). r1 verified live: dev-icloud-backup run 2026-11-07 14:27Z exit 0 (removed 2,127 stale
+  evicted mirror files, no rsync errors); every exclude rule path, including
   `forks/MeshCore-v1.18/.pio`, `StockDock/.build` and `tv-fleet/private`, is gone from the mirror.
-- Not A+: the open Lows below remain, and the CI's Homebrew tools are not version-pinned.
+- Not A+: the open Lows below remain (one is blocked on the operator), and the CI's Homebrew
+  tools are not version-pinned.
 
 Open Lows, each accepted or blocked:
 
@@ -169,6 +181,13 @@ Open Lows, each accepted or blocked:
 - Accepted (Low): CI installs age, bash, just, shellcheck, jq and gitleaks from Homebrew without
   version pins (bottles are checksummed; the job has `contents: read` only and no secrets).
   GitHub Actions are pinned by SHA.
+- Accepted (Low, procedure): a WIP snapshot already on a repo becomes public the moment the repo
+  is made public; dev-pull cannot see that coming. Procedure: delete `refs/wip/*` on origin
+  before changing a repo to public (see "What is true now"). Since N2, no new snapshot is pushed
+  after the change.
+- Accepted (Informational): submodules are not scanned when they are not absorbed (`sub/.git` a directory);
+  dev-pull never runs a git command inside one (no recursion, `--ignore-submodules=all`), which
+  test/untrusted-input.sh pins.
 - Accepted (Informational): gitleaks does not catch personal data or drafts; WIP snapshots now
   go to private repos only, so that content stays in the operator's private GitHub repos.
 
