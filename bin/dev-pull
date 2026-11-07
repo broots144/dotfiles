@@ -57,10 +57,16 @@ export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
 # ssh transports (no file::, ext::, git:// or a local path that runs the repo's uploadpack).
 # What -c cannot neutralise (filter, merge and diff drivers, credential helpers, url rewrites,
 # remote helpers, a pushurl, includes, core.worktree) makes local_config_unsafe skip the repo.
+# Submodules have their own config (.git/modules/<name>/config, or sub/.git/config), which git
+# reads when it recurses: status descends into each submodule, fetch fetches them on demand.
+# So nothing recurses (the recurse settings below, --ignore-submodules=all on every status),
+# and local_config_unsafe also scans the absorbed submodule configs (review 2026-11-07 r2, N1).
 export GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false
 git_q=("${DEV_TREE_GIT[@]}" -c core.hooksPath=/dev/null -c protocol.allow=never
   -c protocol.https.allow=always -c protocol.ssh.allow=always
   -c remote.origin.uploadpack=git-upload-pack -c remote.origin.receivepack=git-receive-pack
+  -c fetch.recurseSubmodules=false -c submodule.recurse=false -c push.recurseSubmodules=no
+  -c diff.ignoreSubmodules=all
   -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30)
 # Only origins on GitHub are fetched, plus the EREs in ~/.config/dev-pull/trusted-origins (one
 # per line, a self-hosted forge; kept out of this public repo). DEV_PULL_ALLOW_FILE=1 is for the
@@ -70,10 +76,22 @@ while IFS= read -r l; do [[ -n "$l" && "$l" != \#* ]] && origin_re+="|$l"; done 
 if [[ "${DEV_PULL_ALLOW_FILE:-}" == 1 ]]; then git_q+=(-c protocol.file.allow=always); origin_re+='|^/'; fi
 unsafe_re='^(include\.path|includeif\..*|filter\..*|merge\..*\.driver|diff\.external|diff\..*\.(command|textconv)|credential\..*|url\..*|protocol\..*|remote\..*\.(vcs|uploadpack|receivepack|pushurl)|core\.(worktree|sshcommand|gitproxy|askpass|alternaterefscommand|attributesfile)|gpg\..*|commit\.gpgsign)$'
 local_config_unsafe() {  # <dir>: prints the first repo-local key that could run a command
-  local k
+  local k gd c m
   k=$( { "${git_q[@]}" -C "$1" config --show-scope --name-only --list 2>/dev/null || true; } |
     awk -F '\t' '$1 == "local" || $1 == "worktree" {print tolower($2)}' | grep -E "$unsafe_re" | head -1)
-  [[ -n "$k" ]] && printf '%s' "$k"
+  [[ -n "$k" ]] && { printf '%s' "$k"; return 0; }
+  # Absorbed submodules, nested ones too (modules/a/modules/b). `config --file` reads the file
+  # only: it follows no include and runs nothing. git itself writes core.worktree into every
+  # absorbed submodule's config, and nothing here runs inside a submodule, so that key is fine.
+  gd=$("${git_q[@]}" -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [[ -d "$gd/modules" ]] || return 1
+  while IFS= read -r -d '' c; do
+    k=$( { "${git_q[@]}" config --file "$c" --name-only --list 2>/dev/null || true; } | tr '[:upper:]' '[:lower:]' | grep -E "$unsafe_re" | grep -vx core.worktree | head -1)
+    [[ -n "$k" ]] || continue
+    m=${c#"$gd/modules/"}; m=${m%/*}; m=${m//\/modules\//\/}
+    printf '%s in submodule %s' "$k" "$m"; return 0
+  done < <(find "$gd/modules" \( -name config -o -name config.worktree \) -type f -print0 2>/dev/null)
+  return 1
 }
 
 me=$(scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s)
@@ -89,19 +107,22 @@ gitleaks="${DEV_PULL_GITLEAKS:-gitleaks}"
 own_repo() { "${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | grep -qE "$own_re"; }
 # Snapshots go only to private repos: anyone can read refs/wip/* on a public one, and gitleaks
 # does not catch personal data or drafts. Visibility comes from the GitHub API, cached for the
-# day; unknown (no gh, offline, API error) counts as public. DEV_PULL_GH is for the tests.
+# day; unknown (no gh, offline, API error) counts as public. The push itself asks again without
+# the cache (`fresh`), so a repo made public today gets no new snapshot (review r2, N2). A
+# snapshot already on a repo turns public with it: delete refs/wip/* before making one public
+# (STATE.md). DEV_PULL_GH is for the tests.
 gh_bin="${DEV_PULL_GH:-gh}"
 mkdir -p "$state/visibility"
-repo_private() {  # <dir>
+repo_private() {  # <dir> [fresh]
   local slug rec v today
   today=$(date -u +%F)
   slug=$("${git_q[@]}" -C "$1" remote get-url origin 2>/dev/null | sed -E 's#\.git/?$##; s#/$##' | awk -F '[/:]' '{print $(NF-1) "/" $NF}')
   [[ "$slug" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
   rec="$state/visibility/${slug//\//__}"
   v=$(cat "$rec" 2>/dev/null || true)
-  if [[ "${v%% *}" != "$today" ]]; then
+  if [[ "${v%% *}" != "$today" || "${2:-}" == fresh ]]; then
     v=$("$gh_bin" api "repos/$slug" --jq .private 2>/dev/null </dev/null || true)
-    [[ "$v" == true || "$v" == false ]] || return 1
+    [[ "$v" == true || "$v" == false ]] || { rm -f "$rec"; return 1; }
     v="$today $v"; printf '%s\n' "$v" > "$rec"
   fi
   [[ "${v#* }" == true ]]
@@ -128,7 +149,7 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
   if [[ "$tree" == "$("${g[@]}" rev-parse 'HEAD^{tree}')" ]]; then wip_msg="dirty only by excluded files, no snapshot: $r"; wip_clear "$r"; return 0; fi
   last=$(cat "$rec" 2>/dev/null || true)
   if [[ "$tree" == "${last%% *}" ]]; then wip_msg="snapshot unchanged: $r"; return 0; fi
-  n_mod=$("${g[@]}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
+  n_mod=$("${g[@]}" status --porcelain --untracked-files=no --ignore-submodules=all | wc -l | tr -d ' ')
   n_new=$("${g[@]}" ls-files --others --exclude-standard | wc -l | tr -d ' ')
   commit=$(printf 'wip(%s): %s, %s modified, %s new, %s\n\nSnapshot by dev-pull; not a branch. Secret-named and >1 MiB files left out.\n' \
     "$me" "$b" "$n_mod" "$n_new" "$(date -u +%FT%TZ)" | "${g[@]}" commit-tree --no-gpg-sign "$tree" -p HEAD) || { wip_msg="snapshot failed (commit-tree): $r"; return 1; }
@@ -139,6 +160,7 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
       --ignore-gitleaks-allow --log-opts="$commit^!" "$dst" >"$work/leaks" 2>&1; then
     wip_msg="snapshot withheld, gitleaks finding: $r (gitleaks git --log-opts='$commit^!' $dst)"; return 1
   fi
+  if ! repo_private "$dst" fresh; then wip_msg="no snapshot, repo public or visibility unknown: $r"; wip_clear "$r"; return 0; fi
   if "${g[@]}" push -q --force origin "$commit:$wip_ref" 2>"$work/err"; then
     echo "$tree $commit" > "$rec"; wip_msg="snapshot pushed to $wip_ref: $r ($n_mod modified, $n_new new)"; return 0
   fi
@@ -212,7 +234,7 @@ while IFS= read -r r; do
   if [[ -z "$b" ]]; then note "$r" detached; n_dirty=$((n_dirty + 1)); problems+=("detached HEAD, fetch only: $r"); continue; fi
   on_origin=0; "${g[@]}" rev-parse -q --verify "refs/remotes/origin/$b" >/dev/null && on_origin=1
   behind=0; (( on_origin )) && behind=$("${g[@]}" rev-list --count "HEAD..origin/$b" 2>/dev/null || echo 0)
-  edits=$("${g[@]}" status --porcelain --untracked-files=no 2>/dev/null)
+  edits=$("${g[@]}" status --porcelain --untracked-files=no --ignore-submodules=all 2>/dev/null)
   new=$("${g[@]}" ls-files --others --exclude-standard 2>/dev/null | head -1)
   # Edits to tracked files: fetch only. New files alone do not hold a fast-forward back (git
   # refuses by itself when one would be overwritten); they were what kept book's sublevel 85
@@ -242,7 +264,7 @@ while IFS= read -r r; do
     (( quiet )) || say "fast-forwarded $r ($behind commits) -> $("${g[@]}" log --oneline -1)"
     note "$r" ff; n_ff=$((n_ff + 1)); stuck_clear "$r"
     if [[ -n "$new" ]]; then
-      if [[ -z "$("${g[@]}" status --porcelain 2>/dev/null)" ]]; then wip_clear "$r"
+      if [[ -z "$("${g[@]}" status --porcelain --ignore-submodules=all 2>/dev/null)" ]]; then wip_clear "$r"
       elif own_repo "$dev/$r"; then wip_snapshot "$r" "$b"; problems+=("new files kept; $wip_msg")
       else problems+=("new files kept: $r"); fi
     fi

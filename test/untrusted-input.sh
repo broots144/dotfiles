@@ -135,5 +135,38 @@ grep -q "skipped: ext" <<<"$out" || { echo "FAIL: dev-pull fetched an ext:: orig
 grep -q "skipped: insteadof" <<<"$out" || { echo "FAIL: dev-pull followed a repo-local url.insteadOf"; fail=1; }
 grep -q ', 6 skipped' <<<"$out" || { echo "FAIL: dev-pull skip count ($out)"; fail=1; }
 
+# dev-pull and submodules (review r2 N1): status and fetch must not run anything from a
+# submodule's own config. Absorbed submodule (.git/modules/<name>/config): the repo is skipped
+# as unsafe. Non-absorbed one (sub/.git/config, not scanned): status must not descend into it
+# (a clean filter would run) and fetch must not recurse into it (credential helper, transport).
+dps() { HOME="$t/dps" ZSH="$here" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$t" \
+  DEV_PULL_GH=/usr/bin/false DEV_PULL_ALLOW_FILE=1 "$here/bin/dev-pull" 2>&1 || true; }
+Gf() { G -c protocol.file.allow=always "$@"; }
+mkdir -p "$t/dps/dev" "$t/dpsup"
+G init -q -b main "$t/dpsup/sub"; echo a > "$t/dpsup/sub/f"; echo '* filter=x' > "$t/dpsup/sub/.gitattributes"
+G -C "$t/dpsup/sub" add .; G -C "$t/dpsup/sub" commit -qm i
+for s in abs nab; do
+  G init -q -b main "$t/dpsup/$s"; echo a > "$t/dpsup/$s/f"; G -C "$t/dpsup/$s" add f
+  Gf -C "$t/dpsup/$s" submodule -q add "$t/dpsup/sub" sub 2>/dev/null; G -C "$t/dpsup/$s" commit -qm i
+done
+Gf clone -q --recurse-submodules "$t/dpsup/abs" "$t/dps/dev/abs" 2>/dev/null
+Gf clone -q --recurse-submodules "$t/dpsup/abs" "$t/dps/dev/absok" 2>/dev/null   # git's own core.worktree only
+git -C "$t/dps/dev/abs/sub" config filter.x.clean "touch $t/pwned-dps-abs; cat"
+git clone -q "$t/dpsup/nab" "$t/dps/dev/nab"; G -C "$t/dps/dev/nab" submodule -q init
+rmdir "$t/dps/dev/nab/sub"; git clone -q "$t/dpsup/sub" "$t/dps/dev/nab/sub"
+git -C "$t/dps/dev/nab/sub" config filter.x.clean "touch $t/pwned-dps-nab; cat"
+touch -t 200001010000 "$t/dps/dev/abs/sub/f" "$t/dps/dev/nab/sub/f"
+echo b >> "$t/dpsup/sub/f"; G -C "$t/dpsup/sub" commit -qam two; new_sub=$(git -C "$t/dpsup/sub" rev-parse HEAD)
+Gf -C "$t/dpsup/nab" submodule -q update --remote sub 2>/dev/null; G -C "$t/dpsup/nab" commit -qam bump
+out=$(dps)
+no "$t/pwned-dps-abs" "dev-pull ran a filter from an absorbed submodule's config"
+no "$t/pwned-dps-nab" "dev-pull ran a filter from a submodule's config (status descended)"
+grep -q "repo-local git config can run commands (filter.x.clean in submodule sub), skipped: abs" <<<"$out" \
+  || { echo "FAIL: dev-pull did not skip a repo whose submodule config names a filter ($out)"; fail=1; }
+grep -q "skipped: absok" <<<"$out" && { echo "FAIL: dev-pull skipped a plain absorbed submodule ($out)"; fail=1; }
+grep -q ", 1 skipped" <<<"$out" || { echo "FAIL: dev-pull submodule skip count ($out)"; fail=1; }
+git -C "$t/dps/dev/nab/sub" cat-file -e "$new_sub" 2>/dev/null && { echo "FAIL: dev-pull fetch recursed into a submodule"; fail=1; }
+[[ "$(git -C "$t/dps/dev/nab" log -1 --format=%s)" == bump ]] || { echo "FAIL: dev-pull did not fast-forward the submodule superproject ($out)"; fail=1; }
+
 (( fail == 0 )) && echo "ok untrusted-input"
 exit "$fail"
