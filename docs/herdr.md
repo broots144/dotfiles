@@ -23,6 +23,11 @@ your user can, by file mode. Never loosen `~/.config/herdr` or point another acc
 herdr                 # attach to the default session (the LaunchAgent keeps it running)
 ```
 
+On n0, `herdr` with no arguments is a shell function (herdr/herdr.zsh): if the server is down it
+starts the LaunchAgent first, so the server never inherits this shell's environment. Named
+sessions (`herdr --session work`) and `herdr --remote n0` from the MacBook start their own
+server when none runs; for the default session keep the LaunchAgent up.
+
 - `ctrl+b` is the prefix. `ctrl+b ?` lists keys and settings; the UI is mouse-first.
 - The sidebar shows each agent's state: working, blocked (needs you, red), idle/done.
 - A background agent that finishes or blocks raises a macOS notification through Ghostty

@@ -109,6 +109,24 @@ HOME="$t/h4" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK="$t/hook.sh" 
 (cd "$t/hk/mod" && echo '{}' | HERDR_ENV=1 HERDR_SOCKET_PATH=/nonexistent HERDR_PANE_ID=w1:p1 bash "$t/hook.sh" session) || true
 [[ ! -e "$t/hk/PWNED" ]] || fail "the patched hook still imported json.py from the session cwd"
 
+# 4f. On n0 a bare `herdr` starts the LaunchAgent's server first instead of its own (audit run-7).
+mkdir -p "$t/z/bin" "$t/z/home/Library/LaunchAgents"; touch "$t/z/home/Library/LaunchAgents/com.broots.herdr-server.plist"
+cat > "$t/z/bin/herdr" <<S
+#!/bin/sh
+echo "herdr \$*" >> "$t/z/calls"
+case "\$*" in "status server") [ -e "$t/z/up" ] && echo "status: running" || echo "status: not running" ;; esac
+S
+cat > "$t/z/bin/launchctl" <<S
+#!/bin/sh
+echo "launchctl \$*" >> "$t/z/calls"; touch "$t/z/up"
+S
+chmod +x "$t/z/bin/herdr" "$t/z/bin/launchctl"
+HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr"
+grep -q "^launchctl kickstart gui/.*/com.broots.herdr-server" "$t/z/calls" || fail "bare herdr did not start the LaunchAgent"
+[[ "$(tail -1 "$t/z/calls")" == "herdr " ]] || fail "bare herdr did not attach after the LaunchAgent started"
+: > "$t/z/calls"; HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr pane list"
+! grep -q launchctl "$t/z/calls" || fail "herdr with arguments touched launchd"
+
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"
