@@ -161,6 +161,25 @@ set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/
 [[ "$out" == *"running server is '0.0.1', not the pin"* ]] || fail "gate did not catch a server older than the pin"
 [[ "$out" == *"at the LaunchAgent's path"* ]] || fail "gate did not check the LaunchAgent's binary"
 
+# 5d. The gate fails when launchd's job is not itself the server holding the socket, e.g. the
+#     wrapper still waiting behind a hand- or SSH-started server (audit run-8).
+sleep 30 & wpid=$!
+cat > "$t/vh/bin/herdr" <<S
+#!/bin/sh
+case "\$*" in
+  --version) echo "herdr \$(cat "$here/herdr/VERSION")" ;;
+  "status server") printf 'status: running\nversion: %s\n' "\$(cat "$here/herdr/VERSION")" ;;
+  *) exit 1 ;;
+esac
+S
+printf '#!/bin/sh\nprintf "\\tstate = running\\n\\tpid = %s\\n"\n' "$wpid" > "$t/vh/bin/launchctl"
+chmod +x "$t/vh/bin/herdr" "$t/vh/bin/launchctl"
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; set -e
+kill "$wpid" 2>/dev/null || true
+[[ "$out" == *"launchd com.broots.herdr-server: running"* ]] || fail "5d: fake launchd not seen as running"
+[[ "$out" == *"FAIL the job's process is 'sleep 30'"* ]] || fail "gate accepted a job process that is not the server"
+[[ "$out" == *"FAIL herdr.sock is held by"* ]] || fail "gate accepted a socket the job does not hold"
+
 # 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.
 while IFS= read -r f; do
   if grep -Eq 'tmux +(new-session|new|attach|attach-session|a)( |$)' "$f" && ! grep -q 'HERDR_ENV' "$f"; then

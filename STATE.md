@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -48,6 +48,10 @@ Last updated: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-ru
   compares with herdr/VERSION and exits 1 with the fix on a mismatch or a failed pin (test 4d).
   (lead, fixed where it can be) a bare `herdr` with the server down started its own server from the
   calling shell; on n0 `herdr` is now a zsh function that starts the LaunchAgent first (test 4f).
+  Security audit run-8 (2026-11-08, superseded by run-9 after these fixes): (low, confirmed) the
+  gate took launchd's `running` as proof the LaunchAgent served herdr, but the wrapper waits
+  behind any server already on the socket; it now needs the job's process to be
+  `/opt/homebrew/bin/herdr server` and to hold herdr.sock (test 5d).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
