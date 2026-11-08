@@ -127,6 +127,24 @@ grep -q "^launchctl kickstart gui/.*/com.broots.herdr-server" "$t/z/calls" || fa
 : > "$t/z/calls"; HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr pane list"
 ! grep -q launchctl "$t/z/calls" || fail "herdr with arguments touched launchd"
 
+# 4g. `herdr --remote` refuses an unpinned local herdr (the host would be offered an unpinned
+#     install), and `herdr integration install` re-applies the hook's python3 -I (audit run-8).
+mkdir -p "$t/r/bin" "$t/r/dot/herdr"; echo 0.9.5 > "$t/r/dot/herdr/VERSION"; cp "$here/herdr/patch-claude-hook.sh" "$t/r/dot/herdr/"
+cat > "$t/r/bin/herdr" <<S
+#!/bin/sh
+echo "herdr \$*" >> "$t/r/calls"
+case "\$*" in --version) echo "herdr \$(cat "$t/r/have")" ;; "integration install claude") cp "$here/test/fixtures/herdr-agent-state.sh" "$t/r/hook.sh" ;; esac
+S
+chmod +x "$t/r/bin/herdr"; echo 0.9.6 > "$t/r/have"
+set +e; HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr --remote n0" 2>"$t/r/err"; rc=$?; set -e
+[[ $rc -ne 0 ]] && grep -q "pins '0.9.5'" "$t/r/err" || fail "herdr --remote ran with an unpinned local herdr"
+! grep -q "herdr --remote" "$t/r/calls" || fail "the unpinned herdr reached the remote attach"
+echo 0.9.5 > "$t/r/have"; : > "$t/r/calls"
+HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr --remote=n0"
+grep -q "^herdr --remote=n0" "$t/r/calls" || fail "the pinned herdr did not attach"
+HOME="$t/r" ZSH="$t/r/dot" HERDR_CLAUDE_HOOK="$t/r/hook.sh" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr integration install claude" >/dev/null
+[[ "$(grep -c 'python3 -I - <<' "$t/r/hook.sh")" == 1 ]] || fail "integration install left the hook without python3 -I"
+
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"

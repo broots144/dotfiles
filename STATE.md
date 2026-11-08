@@ -52,6 +52,13 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   gate took launchd's `running` as proof the LaunchAgent served herdr, but the wrapper waits
   behind any server already on the socket; it now needs the job's process to be
   `/opt/homebrew/bin/herdr server` and to hold herdr.sock (test 5d).
+  (needs_validation, fixed) `herdr --remote` from a Mac whose herdr is not the pin would meet a
+  different protocol generation and herdr offers (default yes) to install its own unpinned
+  binary on the host; the zsh `herdr` wrapper now refuses `--remote` unless the local herdr is
+  herdr/VERSION. (needs_validation, fixed) `herdr integration install` rewrites the Claude hook
+  without the `python3 -I` patch until the next `dot`; the patch is now
+  herdr/patch-claude-hook.sh, run by install.sh and by the wrapper right after an integration
+  install (test 4g).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
