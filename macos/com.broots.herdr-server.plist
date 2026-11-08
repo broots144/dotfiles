@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   LaunchAgent: the default herdr server (agent multiplexer, D-011). Panes and agents live in
-  this process; `herdr` in Ghostty or over SSH attaches to it. Restarted only when it crashes:
-  `herdr server stop` exits 0 and stays stopped until the next login or `launchctl kickstart`.
+  this process; `herdr` in Ghostty or over SSH attaches to it. Always kept alive, also after a
+  clean `herdr server stop` (D-015): a stopped LaunchAgent let the next SSH attach start its own
+  server outside this environment and the D-012 purge (security audit run-8).
   The environment is fixed here so panes never inherit a transient SSH session's variables.
 
   Installed/loaded by macos/install-launchd.sh (HOME placeholders rewritten at install time).
@@ -33,10 +34,7 @@
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <!-- Agents are interactive work: no background throttling. -->

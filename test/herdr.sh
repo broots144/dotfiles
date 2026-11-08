@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # herdr (D-010, D-011): the tracked config is valid and keeps the safe settings, herdr/install.sh
 # links it into an owner-only ~/.config/herdr, bin/herdr-server tightens that directory and
-# waits for a hand-started server, the LaunchAgent restarts only on a crash, and no shell file
+# waits for a hand-started server, the LaunchAgent always keeps it alive, and no shell file
 # auto-attaches tmux inside a herdr pane (herdr docs: agents.mdx, guard with HERDR_ENV).
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -145,11 +145,11 @@ grep -q "^herdr --remote=n0" "$t/r/calls" || fail "the pinned herdr did not atta
 HOME="$t/r" ZSH="$t/r/dot" HERDR_CLAUDE_HOOK="$t/r/hook.sh" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr integration install claude" >/dev/null
 [[ "$(grep -c 'python3 -I - <<' "$t/r/hook.sh")" == 1 ]] || fail "integration install left the hook without python3 -I"
 
-# 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
+# 5. The LaunchAgent: n0 only, always kept alive, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"
 grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
-[[ "$(plutil -extract KeepAlive.SuccessfulExit raw "$p")" == false ]] || fail "KeepAlive must be SuccessfulExit=false"
+[[ "$(plutil -extract KeepAlive raw "$p")" == true ]] || fail "KeepAlive must be true (D-015, audit run-8)"
 [[ "$(plutil -extract StandardOutPath raw "$p")" == "__HOME__/Library/Logs/herdr-server.log" ]] || fail "log path"
 [[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/bin/herdr-server" ]] || fail "program"
 

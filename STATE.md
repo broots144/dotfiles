@@ -59,6 +59,13 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   without the `python3 -I` patch until the next `dot`; the patch is now
   herdr/patch-claude-hook.sh, run by install.sh and by the wrapper right after an integration
   install (test 4g).
+  (needs_validation, fixed) after a clean `herdr server stop` the LaunchAgent stayed down and
+  the next SSH or `--remote` attach started its own server outside the fixed environment and the
+  D-012 purge; the job is now always kept alive (D-015, test 5).
+  (needs_validation, by design, to be settled by run-9's verifiers) pane code can drive other
+  panes through herdr.sock: every pane is the operator's uid, and Claude Code on n0 runs with
+  `bypassPermissions` and no sandbox (checked 2026-11-08), so pane code already holds the
+  operator's full authority.
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
