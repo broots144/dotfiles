@@ -73,7 +73,7 @@ herdr --remote n0                     # the remote server owns the panes; local 
 herdr --remote n0 --session work      # a named session
 ```
 
-`n0` resolves at home (`n0.lab`) and over NetBird (`n0.sl.mesh`); herdr uses your normal SSH
+`n0` must resolve from the MacBook at home and away; herdr uses your normal SSH
 config and keys, so `ssh n0` must work first. The local UI uses the MacBook's keybindings and
 can paste images from the Mac clipboard into a remote agent. Detach with `ctrl+b q`.
 
