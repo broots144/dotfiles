@@ -2,6 +2,7 @@
 
 One line per lesson, newest first.
 
+- 2026-11-08: book was offline during the herdr rollout, so `herdr --remote n0` there refused with 'missing': `dot` does not pull the repo, so a Mac that missed a change needs `git -C ~/.dotfiles pull --ff-only` before `dot`. Check every Mac after a rollout, not only n0.
 - 2026-11-08: A herdr test session started in Phase 0, before `herdr/config.toml` was linked, ran with herdr's defaults and kept fetching agent-detection rules from herdr.dev into the cache every session shares, so the pinned default server ran remote rules despite `manifest_check = false` (found by security audit run-5). Rule: stop throwaway sessions as soon as the test is done, and treat any herdr state shared across sessions as written by the least-configured one (D-012).
 - 2026-11-07: The ignored-file scan found checkouts with `find -name .git -type d`, so git worktrees and submodules (a `.git` file) were never scanned and their gitignored files reached the plaintext mirror. Rule: enumerate working trees by `.git` of either type; keep `-type d` only where an object store is needed (bundles, .git/config).
 - 2026-11-07: macOS openrsync cannot delete an excluded package directory (.app, .bundle) held in iCloud Drive and aborts the whole transfer on one evicted file (EDEADLK). Rule: after an rsync failure into iCloud, remove the paths it named with rm and run it again, bounded; and before rsync, remove evicted (dataless) mirror files that changed, because each one aborts the run when rsync tries to read it back.
