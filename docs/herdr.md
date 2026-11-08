@@ -10,7 +10,7 @@ D-010 (install, pin, Claude integration) and D-011 (the server under launchd).
 |---|---|---|
 | `herdr` binary | Homebrew, pinned (`brew pin herdr`), version in `herdr/VERSION` | herdr's own updater is off |
 | Server, default session | LaunchAgent `com.broots.herdr-server` on n0 | log `~/Library/Logs/herdr-server.log` |
-| Config | `herdr/config.toml`, linked to `~/.config/herdr/config.toml` by `herdr/install.sh` | |
+| Config | `herdr/config.toml`, copied (0600, not linked) to `~/.config/herdr/config.toml` by `herdr/install.sh`; settings changed in herdr are overwritten by the next `dot`, change the tracked file instead | |
 | Sockets | `~/.config/herdr/herdr.sock` (API) and `herdr-client.sock` | 0600, in a 0700 dir |
 | Claude hook | `~/.claude/hooks/herdr-agent-state.sh`, one `SessionStart` entry in `~/.claude/settings.json` | `herdr integration status` |
 

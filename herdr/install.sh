@@ -1,9 +1,12 @@
 #!/bin/sh
 #
-# herdr (agent multiplexer, D-010, D-011): link the tracked config into ~/.config/herdr and keep
+# herdr (agent multiplexer, D-010, D-011): copy the tracked config into ~/.config/herdr and keep
 # that directory owner-only (it holds herdr's API and client sockets, session.json and logs).
-# Run by script/install (`dot`) on every Mac; idempotent. A regular config.toml already there is
-# kept as config.toml.pre-dotfiles before the link replaces it.
+# Run by script/install (`dot`) on every Mac; idempotent. A copy, not a link: herdr writes its
+# settings (theme, toasts) back to config.toml, and through a link that dirtied the deployed
+# checkout, which stops bin/dev-pull from moving n0's dotfiles (code review 2026-11-08). A
+# config.toml that differs from the tracked one is kept as config.toml.pre-dotfiles first; the
+# gate compares the contents.
 
 set -eu
 
@@ -44,13 +47,15 @@ chmod 444 "$ad/remote"
 # The Claude hook runs python3 -I (isolated), see herdr/patch-claude-hook.sh (audit run-7, run-8).
 sh "${ZSH:-$HOME/.dotfiles}/herdr/patch-claude-hook.sh" || true  # it warns; never abort dot
 
-if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
-  echo "herdr: config already linked"
+if [ -f "$dst" ] && [ ! -L "$dst" ] && cmp -s "$src" "$dst"; then
+  echo "herdr: config already current"
   exit 0
 fi
-if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+if [ -f "$dst" ] && [ ! -L "$dst" ]; then
   mv "$dst" "$dst.pre-dotfiles"
   echo "herdr: kept the old config as $dst.pre-dotfiles"
 fi
-ln -sfn "$src" "$dst"
-echo "herdr: linked $dst -> $src"
+rm -f "$dst"
+tmp="$(mktemp "$dst.XXXXXX")"
+cp "$src" "$tmp" && chmod 600 "$tmp" && mv "$tmp" "$dst"
+echo "herdr: copied $src to $dst"
