@@ -77,3 +77,22 @@ verify-phase-8:
 
 # alias of verify-phase-8 (the task brief called it "phase 1")
 verify-herdr: verify-phase-8
+
+# Re-run the security-audit skill's validators on this repo's newest audit run and show its
+# counts. Audit output lives outside the repo and is never committed:
+# ${SECURITY_AUDIT_ROOT:-~/security-audit-skill}/dotfiles/run-N.
+verify-security:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    skill="${SECURITY_AUDIT_SKILL:-$HOME/.claude/skills/security-audit}"
+    root="${SECURITY_AUDIT_ROOT:-$HOME/security-audit-skill}/dotfiles"
+    n=$(ls -d "$root"/run-*/findings.json 2>/dev/null | sed 's|.*/run-\([0-9]*\)/findings.json|\1|' | sort -n | tail -1)
+    [ -n "$n" ] || { echo "no finished audit run for dotfiles"; exit 1; }
+    d="$root/run-$n"
+    echo "dotfiles run-$n: $(jq -r .run_status "$d/run-metadata.json")"
+    node "$skill/validate-findings.cjs" "$d/findings.json"
+    node "$skill/validate-coverage-ledger.cjs" "$d/coverage-ledger.json"
+    jq -r 'def v(x): map(select(.verdict == x)); (v("confirmed") | map(.severity.overall_severity) | group_by(.) | map("\(.[0]) \(length)") | join(", ")) as $s
+      | "confirmed: \(v("confirmed") | length)\(if $s == "" then "" else " (\($s))" end)",
+        "needs_validation: \(v("needs_validation") | length)",
+        "rejected: \(v("rejected") | length)"' "$d/findings.json"
