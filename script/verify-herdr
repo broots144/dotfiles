@@ -17,13 +17,17 @@ nope() { say "FAIL $*"; bad=1; }
 
 pin="$(cat herdr/VERSION)"
 BIN="${HERDR_BIN:-/opt/homebrew/bin/herdr}"  # the binary the LaunchAgent runs, not whatever PATH finds
+# Always the default server: in a herdr pane HERDR_SOCKET_PATH (and maybe HERDR_SESSION) point
+# at that pane's server, which may be a named session on another binary (code review 2026-11-08).
+export HERDR_SOCKET_PATH="$HERDR_DIR/herdr.sock"
+unset HERDR_SESSION
 have="$("$BIN" --version | awk '{print $2}')"
 [[ "$have" == "$pin" ]] && ok "herdr $have at the LaunchAgent's path (pin herdr/VERSION $pin)" || nope "herdr '$have' is not the pin $pin"
 [[ ! -e "$HOME/.local/bin/herdr" ]] && ok "no herdr in ~/.local/bin (remote-attach install path)" \
   || nope "a herdr binary sits in ~/.local/bin and can shadow the pinned one"
 brew list --pinned 2>/dev/null | grep -qx herdr && ok "brew pin herdr" || nope "herdr is not brew-pinned"
 
-line="$(herdr integration status 2>/dev/null | grep '^claude:')"
+line="$("$BIN" integration status 2>/dev/null | grep '^claude:')"
 [[ "$line" == "claude: current"* ]] && ok "integration $line" || nope "integration: '$line'"
 hook="$HOME/.claude/hooks/herdr-agent-state.sh"
 n="$(grep -c "herdr-agent-state.sh' session" "$HOME/.claude/settings.json" 2>/dev/null || true)"
@@ -55,12 +59,12 @@ holders=" $(lsof -t "$HERDR_DIR/herdr.sock" 2>/dev/null | tr '\n' ' ')"
   && ok "server is a session leader (herdr --remote keeps it running)" \
   || nope "server is not a session leader: herdr --remote would offer to restart it"
 
-status="$(herdr status server)"
+status="$("$BIN" status server)"
 served="$(awk -F': *' '/^ *version:/{print $2; exit}' <<<"$status")"
 grep -q '^ *status: running' <<<"$status" && ok "server running" || nope "server: $(head -1 <<<"$status")"
 [[ "$served" == "$pin" ]] && ok "running server is the pin ($served)" \
   || nope "running server is '${served:-?}', not the pin $pin (restart it: launchctl kickstart -k)"
-reply="$(herdr workspace list 2>/dev/null)"
+reply="$("$BIN" workspace list 2>/dev/null)"
 [[ "$reply" == *'"type":"workspace_list"'* ]] && ok "API socket answers (workspace.list)" || nope "API socket: no workspace_list reply"
 
 dir="$HERDR_DIR"
@@ -74,8 +78,8 @@ for s in herdr.sock herdr-client.sock; do
 done
 [[ "$(readlink "$dir/config.toml")" == "$HOME/.dotfiles/herdr/config.toml" ]] && ok "config.toml linked to dotfiles" \
   || nope "config.toml is not the dotfiles link"
-herdr config check >/dev/null 2>&1 && ok "herdr config check" || nope "herdr config check"
-man="$(herdr server agent-manifests 2>/dev/null)"
+"$BIN" config check >/dev/null 2>&1 && ok "herdr config check" || nope "herdr config check"
+man="$("$BIN" server agent-manifests 2>/dev/null)"
 if [[ -n "$man" ]] && ! awk 'NR>3 && NF {print $2}' <<<"$man" | grep -qv '^bundled$' && grep -q '^last check: never' <<<"$man"; then
   ok "agent-detection rules: all bundled with the pinned binary, never checked remotely (D-012)"
 else

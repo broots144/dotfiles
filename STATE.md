@@ -98,6 +98,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
     `session attach default` count as a bare attach (test 4h).
   - The wrapper's pin guard also covers `herdr machine ...` (the same remote install path) and
     refuses when HERDR_REMOTE_BINARY is set (test 4g).
+  - The gate exports HERDR_SOCKET_PATH to the default server's socket, unsets HERDR_SESSION and
+    calls the LaunchAgent's binary everywhere, so run from a named-session pane it no longer
+    checks that pane's server (test 5d).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
