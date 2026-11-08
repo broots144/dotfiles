@@ -47,7 +47,8 @@ server when none runs; for the default session keep the LaunchAgent up.
   own. To keep it stopped: `launchctl bootout gui/$(id -u)/com.broots.herdr-server`.
 - `herdr --remote` refuses to run (through the zsh wrapper) unless this Mac's herdr is the pin in
   herdr/VERSION: with a different protocol generation herdr would offer to install its own,
-  unpinned binary on the host.
+  unpinned binary on the host. On n0 that install path, `~/.local/bin/herdr`, is also locked
+  as an immutable link to the pinned binary (D-019), so the install fails whichever client asks.
 - After a server restart herdr restores the layout and resumes Claude sessions into their
   conversations (`resume_agents_on_restore`). Screen history is not saved to disk
   (`pane_history = false`), on purpose.

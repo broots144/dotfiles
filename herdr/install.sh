@@ -44,6 +44,23 @@ mkdir -p "$ad"
 [ -f "$ad/remote" ] || : > "$ad/remote"
 chmod 444 "$ad/remote"
 
+# herdr's remote attach installs the client's own binary at ~/.local/bin/herdr on the host when
+# the protocol generations differ (default yes), whatever the client's zsh guard says, e.g. from a
+# stale or unguarded client (security audit run-10). Take that path first: an immutable symlink to
+# the pinned Homebrew binary (chflags uchg; the owner can clear it). Discovery then finds the
+# pinned herdr there, and the installer's final rename onto the path fails (D-019).
+lb="${HERDR_LOCAL_BIN:-$HOME/.local/bin}"
+pinned="${HERDR_PINNED_BIN:-/opt/homebrew/bin/herdr}"
+if [ -x "$pinned" ]; then
+  if [ -L "$lb/herdr" ] && [ "$(readlink "$lb/herdr")" = "$pinned" ]; then
+    chflags -h uchg "$lb/herdr" 2>/dev/null || echo "herdr: WARNING: cannot lock $lb/herdr (chflags uchg)" >&2
+  elif [ -e "$lb/herdr" ] || [ -L "$lb/herdr" ]; then
+    echo "herdr: WARNING: $lb/herdr is not the locked link to $pinned (an unpinned remote install?); move it away and rerun" >&2
+  else
+    mkdir -p "$lb" && ln -s "$pinned" "$lb/herdr" && chflags -h uchg "$lb/herdr" && echo "herdr: $lb/herdr locked to $pinned (D-019)"
+  fi
+fi
+
 # The Claude hook runs python3 -I (isolated), see herdr/patch-claude-hook.sh (audit run-7, run-8).
 sh "${ZSH:-$HOME/.dotfiles}/herdr/patch-claude-hook.sh" || true  # it warns; never abort dot
 

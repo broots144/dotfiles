@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -66,6 +66,11 @@ Last updated: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-revi
   panes through herdr.sock: every pane is the operator's uid, and Claude Code on n0 runs with
   `bypassPermissions` and no sandbox (checked 2026-11-08), so pane code already holds the
   operator's full authority.
+  Security audit run-10 (2026-11-08, superseded by run-11 after this fix): (needs_validation,
+  fixed) the zsh pin guard let `herdr --session x machine add n0` through and could not stop a
+  stale or unguarded client, whose remote attach would install an unpinned herdr at n0's
+  ~/.local/bin/herdr. That path is now an immutable link to the pinned binary (install.sh, gate,
+  test 4h; D-019) and the guard matches `machine` in any position (test 4g).
   Code review (/code-review max, 2026-11-08) fixes, one commit each:
   - install-launchd.sh reloads an agent only when its rendered plist changed or the job is not
     loaded; every `dot` on n0 used to boot out the herdr server and end every pane (herdr-
