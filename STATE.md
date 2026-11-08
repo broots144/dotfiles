@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (P8 herdr: config, server LaunchAgent, tests and gate added; deploy and gate output pending). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -11,7 +11,7 @@ Last updated: 2026-11-07 by Claude (P8 herdr: config, server LaunchAgent, tests 
 - [x] P4 Two-machine ~/dev sync, GitHub as hub
 - [x] P5 Nightly Homebrew upgrade on the laptop
 - [x] P6 Repo-state pattern (PR #8)
-- [~] P8 herdr on n0 (plan docs/plans/P8-herdr.md, D-010, D-011): built on branch `herdr/p8`; deploy on n0 and `just verify-phase-8` output pending
+- [x] P8 herdr on n0 (plan docs/plans/P8-herdr.md, D-010, D-011, PR #24)
 
 ## What is true now
 
@@ -23,7 +23,9 @@ Last updated: 2026-11-07 by Claude (P8 herdr: config, server LaunchAgent, tests 
   idle as a green ring. No shell file auto-attaches tmux; `test/herdr.sh` fails on one that would
   without the `HERDR_ENV` guard. `herdr/config.toml` (linked by `herdr/install.sh`), the n0
   LaunchAgent `com.broots.herdr-server` (`bin/herdr-server`, sets `~/.config/herdr` to 0700) and
-  the gate `just verify-phase-8` (alias `verify-herdr`) are on the branch, not yet deployed.
+  the gate `just verify-phase-8` (alias `verify-herdr`) are merged (PR #24) and deployed on n0
+  2026-11-07: `herdr/install.sh` linked the config (the old one kept as
+  `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.
 - Deployed by symlink: `~/.dotfiles -> ~/dev/dotfiles` on n0. `script/bootstrap` links `*.symlink`
   into `$HOME`; `bin/dot` runs installers and `macos/install-launchd.sh`.
 - LaunchAgents (`macos/*.plist`, host-gated by the `dotfiles-hosts` marker, matched on `HostName`
@@ -189,6 +191,28 @@ ok untrusted-input
 $ just verify-phase-6
 ok check-state
 verify-phase-6 ok
+```
+
+## Verify output (P8, 2026-11-07, n0)
+
+```
+$ just verify-phase-8
+test/herdr.sh
+ok herdr
+script/verify-herdr
+ok   herdr 0.9.5 (pin herdr/VERSION 0.9.5)
+ok   brew pin herdr
+ok   integration claude: current (v11) (~/.claude/hooks/herdr-agent-state.sh)
+ok   settings.json has 1 herdr SessionStart hook; hook sha256 7a7b3a7150dde3e4
+ok   launchd com.broots.herdr-server: running
+ok   server running
+ok   API socket answers (workspace.list)
+ok   ~/.config/herdr mode 700, owner me
+ok   herdr.sock: socket 600, owner me
+ok   herdr-client.sock: socket 600, owner me
+ok   config.toml linked to dotfiles
+ok   herdr config check
+verify-phase-8 ok
 ```
 
 ## Security grade
