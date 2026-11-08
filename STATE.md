@@ -78,6 +78,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - install.sh reads the installed version from $(brew --prefix)/opt/herdr/bin/herdr --version,
     not from keg names, so a Homebrew revision (0.9.5_1) or a second keg no longer reads as a
     mismatch (test 4d).
+  - herdr/install.sh warns loudly on a version mismatch or failed pin but exits 0: its exit 1
+    aborted `dot` (set -e) before the LaunchAgents and later installers, and Homebrew cannot
+    downgrade. The n0 gate and the --remote guard enforce the pin (test 4d).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
