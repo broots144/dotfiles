@@ -8,7 +8,8 @@ bad=0
 # "me"/"other" (never a name), and the account name is masked anyway as a backstop.
 ME="$(id -un)"; UID_ME="$(id -u)"
 HERDR_DIR="${HERDR_DIR:-$HOME/.config/herdr}"
-say()  { local m="$*"; m="${m//$HOME/~}"; echo "${m//$ME/<user>}"; }
+# Quoted: an unquoted ~ in the replacement is tilde-expanded back to the home path.
+say()  { local m="$*"; m="${m//"$HOME"/"~"}"; echo "${m//"$ME"/<user>}"; }
 # Nothing but say() reaches the transcript: no command's stderr (paths, names) gets through.
 exec 2>/dev/null
 owner() { [[ "$1" == "$UID_ME" ]] && echo me || echo other; }
