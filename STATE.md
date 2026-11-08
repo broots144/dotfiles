@@ -75,6 +75,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
     /usr/bin/perl setsid shim that stays the launchd job, so `herdr --remote n0` no longer offers
     to restart (and end every pane of) n0's server. The gate finds the server as the job's child
     and checks detached_server_daemon. Tests 4a and 5d.
+  - install.sh reads the installed version from $(brew --prefix)/opt/herdr/bin/herdr --version,
+    not from keg names, so a Homebrew revision (0.9.5_1) or a second keg no longer reads as a
+    mismatch (test 4d).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

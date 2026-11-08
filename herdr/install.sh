@@ -22,7 +22,9 @@ BREW="${HERDR_BREW:-brew}"
 want="$(cat "${ZSH:-$HOME/.dotfiles}/herdr/VERSION")"
 version_ok=1
 if command -v "$BREW" >/dev/null 2>&1 && "$BREW" list --versions herdr >/dev/null 2>&1; then
-  have="$("$BREW" list --versions herdr | awk '{print $NF}')"
+  # The installed binary's own version: `brew list --versions` prints keg names, so a
+  # Homebrew revision (0.9.5_1) or a second keg would read as a mismatch (code review 2026-11-08).
+  have="$("$("$BREW" --prefix)/opt/herdr/bin/herdr" --version 2>/dev/null | awk '{print $2}')"
   if "$BREW" pin herdr >/dev/null 2>&1; then echo "herdr: brew pin herdr ($have)"; else echo "herdr: brew pin herdr FAILED" >&2; version_ok=0; fi
   if [ "$have" != "$want" ]; then
     echo "herdr: installed $have, but herdr/VERSION pins $want: brew unpin herdr && brew upgrade herdr (or install $want), then rerun" >&2
