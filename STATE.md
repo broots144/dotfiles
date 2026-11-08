@@ -33,6 +33,9 @@ Last updated: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr nev
   this public STATE.md (it now compares uids and says owner me/other, and masks the name anyway);
   (informational) the D-012 cache purge ran before the wait for a hand-started server (now right
   before exec; docs restart the server with `launchctl kickstart`, never a bare `herdr`).
+  Lead resolved by fixing it: `herdr/install.sh` now `brew pin`s herdr on every Mac, so the
+  MacBook's nightly upgrade cannot put a newer client against n0's pinned server over
+  `herdr --remote n0` (the run's needs_validation lead `herdr-remote-attach-installs-unpinned-binary-on-n0`).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.

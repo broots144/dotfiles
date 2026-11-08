@@ -68,6 +68,27 @@ HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" 
 [[ ! -e "$t/st/agent-detection/remote" && ! -e "$t/st/agent-detection/status.toml" ]] || fail "remote rule cache left in place"
 [[ -d "$t/st/agent-detection/local" ]] || fail "herdr-server removed more than the remote cache"
 
+# 4c. ...even when the cache is refilled while it waits for a hand-started server (audit run-6).
+: > "$t/calls"; echo 0 > "$t/n"; rm -rf "$t/st"; mkdir -p "$t/st/agent-detection"
+cat > "$t/herdr-refill" <<S
+#!/bin/sh
+case "\$*" in
+  "status server") n=\$(cat "$t/n"); echo \$((n + 1)) > "$t/n"
+    mkdir -p "$t/st/agent-detection/remote"; touch "$t/st/agent-detection/remote/claude.toml"
+    [ "\$n" -lt 2 ] && echo "status: running" || echo "status: not running" ;;
+  --version) echo "herdr 0.0.0" ;;
+  server) [ -e "$t/st/agent-detection/remote" ] && echo "CACHE PRESENT AT EXEC" || echo "clean at exec" ;;
+esac
+S
+chmod +x "$t/herdr-refill"
+out="$(HOME="$t/h2" HERDR_BIN="$t/herdr-refill" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server")"
+[[ "$out" == *"clean at exec"* ]] || fail "a cache refilled during the wait reached the server: $out"
+
+# 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010).
+printf '#!/bin/sh\necho "$*" >> "%s/brew-calls"\nexit 0\n' "$t" > "$t/brew"; chmod +x "$t/brew"
+HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" sh "$here/herdr/install.sh" >/dev/null
+grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
+
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"
