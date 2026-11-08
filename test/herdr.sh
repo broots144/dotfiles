@@ -171,7 +171,7 @@ err="$(HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr
 HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr server stop --session work"
 grep -q "herdr server stop --session work" "$t/z/calls" || fail "a named session's stop was refused"
 
-# 4g. `herdr --remote` refuses an unpinned local herdr (the host would be offered an unpinned
+# 4g. `herdr --remote` and `herdr machine` refuse an unpinned local herdr or HERDR_REMOTE_BINARY (the host would be offered an unpinned
 #     install), and `herdr integration install` re-applies the hook's python3 -I (audit run-8).
 mkdir -p "$t/r/bin" "$t/r/dot/herdr"; echo 0.9.5 > "$t/r/dot/herdr/VERSION"; cp "$here/herdr/patch-claude-hook.sh" "$t/r/dot/herdr/"
 cat > "$t/r/bin/herdr" <<S
@@ -186,6 +186,12 @@ set +e; HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/
 echo 0.9.5 > "$t/r/have"; : > "$t/r/calls"
 HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr --remote=n0"
 grep -q "^herdr --remote=n0" "$t/r/calls" || fail "the pinned herdr did not attach"
+echo 0.9.6 > "$t/r/have"; : > "$t/r/calls"; set +e
+HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr machine add n0" 2>/dev/null; rc=$?
+echo 0.9.5 > "$t/r/have"
+HERDR_REMOTE_BINARY=/tmp/x HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr --remote n0" 2>/dev/null; rc2=$?; set -e
+[[ $rc == 1 && $rc2 == 1 ]] || fail "herdr machine with an unpinned herdr ($rc) or HERDR_REMOTE_BINARY ($rc2) was not refused"
+! grep -q -e "^herdr machine" -e "^herdr --remote" "$t/r/calls" || fail "a refused remote command reached herdr"
 HOME="$t/r" ZSH="$t/r/dot" HERDR_CLAUDE_HOOK="$t/r/hook.sh" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr integration install claude" >/dev/null
 [[ "$(grep -c 'python3 -I - <<' "$t/r/hook.sh")" == 1 ]] || fail "integration install left the hook without python3 -I"
 

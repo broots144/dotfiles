@@ -5,7 +5,7 @@
 # through launchd and wait for its socket before attaching; if that fails, say so and stop.
 #
 # Two more guards (security audit run-8):
-# - `herdr --remote <host>` only with the pinned version here: when client and server protocol
+# - `herdr --remote <host>` and `herdr machine ...` only with the pinned version here: when client and server protocol
 #   generations differ, herdr offers to install its own unpinned binary on the remote host
 #   (default yes). Same pin on both ends (D-010) means the offer never comes.
 # - `herdr integration install` rewrites the Claude hook without the python3 -I patch; put it
@@ -15,18 +15,25 @@
 #   attach to start outside the LaunchAgent. Use launchctl to restart it or keep it stopped.
 herdr() {
   local label=com.broots.herdr-server dot="${ZSH:-$HOME/.dotfiles}" a
-  for a in "$@"; do
-    if [[ "$a" == --remote || "$a" == --remote=* ]]; then
-      local have pin
-      have="$(command herdr --version 2>/dev/null | awk '{print $2}')"
-      pin="$(cat "$dot/herdr/VERSION" 2>/dev/null)"
-      if [[ -z "$pin" || "$have" != "$pin" ]]; then
-        print -u2 "herdr: this herdr is '${have:-missing}' but herdr/VERSION pins '${pin:-?}'; fix the pin here (dot) before --remote, or herdr may install an unpinned binary on the host"
-        return 1
-      fi
-      break
+  # Remote paths: --remote and every `herdr machine` command can install the local binary on
+  # the host (upstream machine.rs -> prepare_discovered_remote_herdr). HERDR_REMOTE_BINARY skips
+  # discovery and installs whatever it names (code review 2026-11-08).
+  local remote=0
+  [[ "$1" == machine ]] && remote=1
+  for a in "$@"; do [[ "$a" == --remote || "$a" == --remote=* ]] && remote=1; done
+  if (( remote )); then
+    if [[ -n "${HERDR_REMOTE_BINARY:-}" ]]; then
+      print -u2 "herdr: HERDR_REMOTE_BINARY is set; unset it, it would install that binary on the host unpinned"
+      return 1
     fi
-  done
+    local have pin
+    have="$(command herdr --version 2>/dev/null | awk '{print $2}')"
+    pin="$(cat "$dot/herdr/VERSION" 2>/dev/null)"
+    if [[ -z "$pin" || "$have" != "$pin" ]]; then
+      print -u2 "herdr: this herdr is '${have:-missing}' but herdr/VERSION pins '${pin:-?}'; fix the pin here (dot) before --remote, or herdr may install an unpinned binary on the host"
+      return 1
+    fi
+  fi
   if [[ "$1" == server && "$2" == stop && -f "$HOME/Library/LaunchAgents/$label.plist" && " $* " != *" --session"* ]]; then
     print -u2 "herdr: the default server belongs to the LaunchAgent (D-016). Restart it: launchctl kickstart -k gui/$(id -u)/$label; keep it stopped: launchctl bootout gui/$(id -u)/$label"
     return 1
