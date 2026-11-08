@@ -45,6 +45,9 @@ server when none runs; for the default session keep the LaunchAgent up.
   clean stop; start it again with `launchctl kickstart gui/$(id -u)/com.broots.herdr-server`
   (not a bare `herdr`, which would start a server outside the LaunchAgent's fixed environment and
   without its D-012 cache purge). Restart in one step: `launchctl kickstart -k gui/$(id -u)/com.broots.herdr-server`.
+- `herdr --remote` refuses to run (through the zsh wrapper) unless this Mac's herdr is the pin in
+  herdr/VERSION: with a different protocol generation herdr would offer to install its own,
+  unpinned binary on the host.
 - After a server restart herdr restores the layout and resumes Claude sessions into their
   conversations (`resume_agents_on_restore`). Screen history is not saved to disk
   (`pane_history = false`), on purpose.
