@@ -25,7 +25,8 @@ cat > "$t/bin/launchctl" <<S
 #!/bin/sh
 echo "launchctl \$*" >> "\$LOG"
 case "\$1" in
-  print) n=\$(cat "$t/n-print" 2>/dev/null || echo 0); echo \$((n + 1)) > "$t/n-print"
+  print) [ -n "\${LOADED:-}" ] && exit 0
+         n=\$(cat "$t/n-print" 2>/dev/null || echo 0); echo \$((n + 1)) > "$t/n-print"
          [ "\$n" -lt "\${LINGER:-0}" ] && exit 0; echo "Could not find service" >&2; exit 113 ;;
   bootstrap) n=\$(cat "$t/n-bs" 2>/dev/null || echo 0); echo \$((n + 1)) > "$t/n-bs"
          [ "\$n" -lt "\${BS_FAILS:-0}" ] && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; }; exit 0 ;;
@@ -69,6 +70,19 @@ ok grep -qx "launchctl bootout gui/$uid/com.broots.mini" "$LOG"
 ok [ ! -e "$la/com.broots.mini.plist" ]
 ok grep -q '<string>com.broots.laptop</string>' "$la/com.broots.laptop.plist"
 
+# An unchanged plist whose job is loaded is not reloaded: a bootout would stop it (for the
+# herdr server, every pane). A changed plist, or a job that is not loaded, is reloaded.
+run FAKE_HOSTNAME=n0
+run FAKE_HOSTNAME=n0 LOADED=1
+ok [ "$rc" = 0 ]
+for l in mini everywhere both comma; do ok grep -qx "unchanged com.broots.$l" <<<"$out"; done
+ok bash -c '! grep -q "bootout\|bootstrap" "$1"' _ "$LOG"
+echo '<!-- edit -->' >> "$t/macos/com.broots.mini.plist"
+run FAKE_HOSTNAME=n0 LOADED=1
+ok grep -qx 'loaded com.broots.mini' <<<"$out"; ok grep -qx 'unchanged com.broots.everywhere' <<<"$out"
+ok grep -qx "launchctl bootout gui/$uid/com.broots.mini" "$LOG"
+rm -f "$la"/*.plist
+
 # bootout is asynchronous: the job lingers, and a bootstrap right after it fails with error 5.
 # The script waits for the job to go and retries the bootstrap, and one agent that still fails
 # does not stop the others from loading; the run exits 1 at the end.
@@ -77,7 +91,7 @@ run FAKE_HOSTNAME=n0 LINGER=2 BS_FAILS=1
 ok [ "$rc" = 0 ]
 for l in mini everywhere both comma; do ok grep -qx "loaded com.broots.$l" <<<"$out"; done
 ok [ "$(grep -c '^launchctl print ' "$LOG")" -ge 3 ]
-rm -f "$t/n-print" "$t/n-bs"
+rm -f "$t/n-print" "$t/n-bs" "$la"/*.plist
 run FAKE_HOSTNAME=n0 BS_FAILS=3
 ok [ "$rc" = 1 ]
 ok grep -q 'failed to load com.broots.both' <<<"$out"; ok grep -q 'Bootstrap failed: 5' <<<"$out"
