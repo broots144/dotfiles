@@ -103,6 +103,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
     checks that pane's server (test 5d).
   - bin/herdr-server always removes agent-detection/status.toml, not only with a remote cache, so
     a failed check no longer fails the gate after every restart (test 4b2).
+  - agent-detection/remote is a read-only placeholder file (D-012 addendum), put there by
+    install.sh, bin/herdr-server and the wrapper and checked by the gate, so even `herdr server
+    update-agent-manifests` cannot cache unpinned rules (tests 4b, 4d2).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

@@ -36,6 +36,13 @@ fi
 # A failed check writes status.toml without remote/; left in place it failed the gate's
 # "last check: never" test after every restart (code review 2026-11-08).
 rm -f "$STATE_DIR/agent-detection/status.toml"
+# agent-detection/remote is a read-only regular file, so no fetch can cache rules there: herdr's
+# writer needs it to be a directory (create_dir_all fails) and its reader then finds no
+# remote/<agent>.toml and uses the bundled rules. That also covers `herdr server
+# update-agent-manifests`, which fetches whatever manifest_check says (D-012 addendum).
+mkdir -p "$STATE_DIR/agent-detection"
+[[ -f "$STATE_DIR/agent-detection/remote" ]] || : > "$STATE_DIR/agent-detection/remote"
+chmod 444 "$STATE_DIR/agent-detection/remote"
 
 echo "$(date -u +%FT%TZ) herdr-server: starting $("$HERDR_BIN" --version 2>/dev/null)"
 # `herdr --remote` offers to restart (and so end every pane of) a server that is not a session
