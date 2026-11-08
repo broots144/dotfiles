@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# self-update <dotfiles dir>: fast-forward the dotfiles checkout to origin/master before `dot`
+# installs from it (D-021). A Mac that was offline during a rollout otherwise keeps installing
+# the old version (book and herdr, 2026-11-08).
+#
+# It never blocks `dot`: off master, with tracked edits, with local commits, or offline, it says
+# why and leaves HEAD alone. Exit 0: HEAD unchanged. Exit 10: HEAD moved, so `dot` re-runs the
+# new copy of itself. Hooks are off and only https/ssh are allowed, as in dev-pull (D-009).
+# DOT_NO_PULL=1 skips it.
+set -u
+dir="$1"
+[ "${DOT_NO_PULL:-}" = 1 ] && exit 0
+: "${GIT_SSH_COMMAND:=ssh -o ConnectTimeout=10 -o BatchMode=yes}"
+export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0
+file=never; [ "${DOT_UPDATE_ALLOW_FILE:-}" = 1 ] && file=always  # tests use a local upstream
+g() {
+	git -C "$dir" -c core.hooksPath=/dev/null -c protocol.allow=never \
+		-c protocol.https.allow=always -c protocol.ssh.allow=always -c protocol.file.allow="$file" "$@"
+}
+branch="$(g symbolic-ref --short -q HEAD)" || branch=""
+if [ "$branch" != master ]; then
+	echo "dot: the dotfiles checkout is on '${branch:-a detached HEAD}', not master: not updating it" >&2
+	exit 0
+fi
+if ! g diff --quiet HEAD -- 2>/dev/null; then
+	echo "dot: the dotfiles checkout has uncommitted edits: not updating it (commit or stash, then git pull --ff-only)" >&2
+	exit 0
+fi
+before="$(g rev-parse HEAD)"
+if ! g fetch -q origin master 2>/dev/null; then
+	echo "dot: could not reach origin (offline?): installing from the checkout as it is" >&2
+	exit 0
+fi
+if ! g merge -q --ff-only FETCH_HEAD 2>/dev/null; then
+	echo "dot: the dotfiles checkout has commits origin/master lacks: not updating it (push or rebase them)" >&2
+	exit 0
+fi
+after="$(g rev-parse HEAD)"
+[ "$before" = "$after" ] && exit 0
+echo "› dotfiles updated $(g rev-parse --short "$before")..$(g rev-parse --short "$after")"
+exit 10

@@ -1,5 +1,5 @@
 # Maintained shell scripts (bash/sh). Legacy holman scripts are syntax-checked only.
-maintained := "bin/brew-nightly bin/herdr-server herdr/install.sh herdr/patch-claude-hook.sh script/verify-herdr bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
+maintained := "bin/brew-nightly script/self-update bin/herdr-server herdr/install.sh herdr/patch-claude-hook.sh script/verify-herdr bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
 
 default: check
 
