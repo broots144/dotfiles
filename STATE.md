@@ -109,6 +109,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - herdr/install.sh copies config.toml (0600) instead of linking it into the checkout, where
     herdr's settings writes dirtied n0's ~/dev/dotfiles and stopped dev-pull; an old link is
     replaced, a differing file kept as .pre-dotfiles, and the gate compares contents (test 3).
+  - test 6's tmux auto-attach scan catches bare tmux, flag-only starts, `exec tmux`, `new -A`,
+    `at`, and needs HERDR_ENV on the same line or the 3 before it, instead of anywhere in the
+    file; the scanner is checked on good and bad samples first.
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
