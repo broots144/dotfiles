@@ -38,6 +38,12 @@ herdr() {
     print -u2 "herdr: the default server belongs to the LaunchAgent (D-016). Restart it: launchctl kickstart -k gui/$(id -u)/$label; keep it stopped: launchctl bootout gui/$(id -u)/$label"
     return 1
   fi
+  # No remote agent-detection cache, whichever server starts (D-012 addendum).
+  local ad="${XDG_STATE_HOME:-$HOME/.local/state}/herdr/agent-detection"
+  if [[ ! -f "$ad/remote" ]]; then
+    [[ -d "$ad/remote" ]] && rm -rf "$ad/remote"
+    mkdir -p "$ad" && : > "$ad/remote" && chmod 444 "$ad/remote"
+  fi
   # A bare attach to the default session, however it is spelled (upstream session.rs).
   local bare=0 i
   case "$*" in ""|"--session default"|"--session=default"|"session attach default") bare=1 ;; esac

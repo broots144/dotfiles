@@ -33,6 +33,14 @@ if command -v "$BREW" >/dev/null 2>&1 && "$BREW" list --versions herdr >/dev/nul
   fi
 fi
 
+# The remote agent-detection cache cannot exist: a read-only placeholder file takes its path
+# (D-012 addendum; bin/herdr-server and the gate do the same check).
+ad="${XDG_STATE_HOME:-$HOME/.local/state}/herdr/agent-detection"
+mkdir -p "$ad"
+[ -d "$ad/remote" ] && rm -rf "$ad/remote"
+[ -f "$ad/remote" ] || : > "$ad/remote"
+chmod 444 "$ad/remote"
+
 # The Claude hook runs python3 -I (isolated), see herdr/patch-claude-hook.sh (audit run-7, run-8).
 sh "${ZSH:-$HOME/.dotfiles}/herdr/patch-claude-hook.sh" || true  # it warns; never abort dot
 

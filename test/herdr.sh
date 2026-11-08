@@ -89,8 +89,10 @@ mkdir -p "$t/st/agent-detection/remote" "$t/st/agent-detection/local"
 touch "$t/st/agent-detection/remote/claude.toml" "$t/st/agent-detection/status.toml"
 : > "$t/calls"; echo 2 > "$t/n"
 HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server" >/dev/null
-[[ ! -e "$t/st/agent-detection/remote" && ! -e "$t/st/agent-detection/status.toml" ]] || fail "remote rule cache left in place"
+[[ ! -d "$t/st/agent-detection/remote" && ! -e "$t/st/agent-detection/status.toml" ]] || fail "remote rule cache left in place"
 [[ -d "$t/st/agent-detection/local" ]] || fail "herdr-server removed more than the remote cache"
+[[ -f "$t/st/agent-detection/remote" && "$(mode "$t/st/agent-detection/remote")" == 444 ]] || fail "no read-only placeholder at agent-detection/remote"
+mkdir -p "$t/st/agent-detection/remote/x" 2>/dev/null && fail "a directory could be created at the placeholder"
 
 # 4b2. ...and a lone status.toml from a failed check goes too (code review 2026-11-08).
 rm -rf "$t/st"; mkdir -p "$t/st/agent-detection"; touch "$t/st/agent-detection/status.toml"; echo 2 > "$t/n"
@@ -106,7 +108,7 @@ case "\$*" in
     mkdir -p "$t/st/agent-detection/remote"; touch "$t/st/agent-detection/remote/claude.toml"
     [ "\$n" -lt 2 ] && echo "status: running" || echo "status: not running" ;;
   --version) echo "herdr 0.0.0" ;;
-  server) [ -e "$t/st/agent-detection/remote" ] && echo "CACHE PRESENT AT EXEC" || echo "clean at exec" ;;
+  server) [ -d "$t/st/agent-detection/remote" ] && echo "CACHE PRESENT AT EXEC" || echo "clean at exec" ;;
 esac
 S
 chmod +x "$t/herdr-refill"
@@ -129,6 +131,12 @@ FAKE_HERDR_VERSION="$(cat "$here/herdr/VERSION")" HOME="$t/h3" ZSH="$here" HERDR
 grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
 set +e; err="$(FAKE_HERDR_VERSION=9.9.9 HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" 2>&1 >/dev/null)"; rc=$?; set -e
 [[ $rc -eq 0 && "$err" == *"WARNING: installed 9.9.9, but herdr/VERSION pins"* ]] || fail "install.sh must warn about a herdr that is not the pin, and not abort dot ($rc)"
+
+# 4d2. install.sh replaces a remote cache directory with the read-only placeholder (D-012 addendum).
+mkdir -p "$t/h5/.local/state/herdr/agent-detection/remote"; touch "$t/h5/.local/state/herdr/agent-detection/remote/claude.toml"
+HOME="$t/h5" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" >/dev/null
+p5="$t/h5/.local/state/herdr/agent-detection/remote"
+[[ -f "$p5" && "$(mode "$p5")" == 444 ]] || fail "install.sh did not put the placeholder in place"
 
 # 4e. install.sh puts herdr's Claude hook in isolated mode, so a json.py in the session's cwd
 #     is not imported (audit run-7); idempotent.

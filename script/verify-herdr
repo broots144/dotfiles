@@ -79,6 +79,11 @@ done
 [[ "$(readlink "$dir/config.toml")" == "$HOME/.dotfiles/herdr/config.toml" ]] && ok "config.toml linked to dotfiles" \
   || nope "config.toml is not the dotfiles link"
 "$BIN" config check >/dev/null 2>&1 && ok "herdr config check" || nope "herdr config check"
+ph="${XDG_STATE_HOME:-$HOME/.local/state}/herdr/agent-detection/remote"
+read -r pmode puid <<<"$(stat -f '%Lp %u' "$ph" 2>/dev/null)"
+[[ -f "$ph" && ! -L "$ph" && "$pmode" == 444 && "$puid" == "$UID_ME" ]] \
+  && ok "agent-detection/remote is a read-only placeholder file (no remote rules can be cached)" \
+  || nope "agent-detection/remote is not the read-only placeholder file (run herdr/install.sh)"
 man="$("$BIN" server agent-manifests 2>/dev/null)"
 if [[ -n "$man" ]] && ! awk 'NR>3 && NF {print $2}' <<<"$man" | grep -qv '^bundled$' && grep -q '^last check: never' <<<"$man"; then
   ok "agent-detection rules: all bundled with the pinned binary, never checked remotely (D-012)"
