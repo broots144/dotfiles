@@ -2,7 +2,7 @@
 # environment and purges unpinned agent-detection rules first (D-012). A bare `herdr` with no
 # server running would start one itself from this shell, with this shell's environment
 # (security audit run-7). So when the LaunchAgent is installed and its server is down, start it
-# through launchd and wait for its socket before attaching.
+# through launchd and wait for its socket before attaching; if that fails, say so and stop.
 #
 # Two more guards (security audit run-8):
 # - `herdr --remote <host>` only with the pinned version here: when client and server protocol
@@ -31,14 +31,25 @@ herdr() {
     print -u2 "herdr: the default server belongs to the LaunchAgent (D-016). Restart it: launchctl kickstart -k gui/$(id -u)/$label; keep it stopped: launchctl bootout gui/$(id -u)/$label"
     return 1
   fi
-  if (( $# == 0 )) && [[ -f "$HOME/Library/LaunchAgents/$label.plist" ]] \
+  # A bare attach to the default session, however it is spelled (upstream session.rs).
+  local bare=0 i
+  case "$*" in ""|"--session default"|"--session=default"|"session attach default") bare=1 ;; esac
+  if (( bare )) && [[ -f "$HOME/Library/LaunchAgents/$label.plist" ]] \
      && ! command herdr status server 2>/dev/null | grep -q 'status: running'; then
-    launchctl kickstart "gui/$(id -u)/$label" 2>/dev/null
-    local i
-    for i in {1..50}; do
+    # Never fall through to a server started from this shell (code review 2026-11-08): say why
+    # and stop instead.
+    if ! launchctl kickstart "gui/$(id -u)/$label" 2>/dev/null; then
+      print -u2 "herdr: launchctl kickstart of $label failed (not loaded? run macos/install-launchd.sh); not starting a server from this shell (D-011)"
+      return 1
+    fi
+    for i in {1..${HERDR_ATTACH_WAIT_TICKS:-100}}; do
       command herdr status server 2>/dev/null | grep -q 'status: running' && break
       sleep 0.1
     done
+    if ! command herdr status server 2>/dev/null | grep -q 'status: running'; then
+      print -u2 "herdr: the LaunchAgent's server is not up yet (waiting behind another server? see ~/Library/Logs/herdr-server.log); not starting one from this shell (D-011)"
+      return 1
+    fi
   fi
   command herdr "$@"
   local rc=$?
