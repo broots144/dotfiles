@@ -9,28 +9,39 @@ bad=0
 ME="$(id -un)"; UID_ME="$(id -u)"
 HERDR_DIR="${HERDR_DIR:-$HOME/.config/herdr}"
 say()  { local m="$*"; m="${m//$HOME/~}"; echo "${m//$ME/<user>}"; }
+# Nothing but say() reaches the transcript: no command's stderr (paths, names) gets through.
+exec 2>/dev/null
 owner() { [[ "$1" == "$UID_ME" ]] && echo me || echo other; }
 ok()   { say "ok   $*"; }
 nope() { say "FAIL $*"; bad=1; }
 
 pin="$(cat herdr/VERSION)"
-have="$(herdr --version 2>/dev/null | awk '{print $2}')"
-[[ "$have" == "$pin" ]] && ok "herdr $have (pin herdr/VERSION $pin)" || nope "herdr '$have' is not the pin $pin"
+BIN="${HERDR_BIN:-/opt/homebrew/bin/herdr}"  # the binary the LaunchAgent runs, not whatever PATH finds
+have="$("$BIN" --version | awk '{print $2}')"
+[[ "$have" == "$pin" ]] && ok "herdr $have at the LaunchAgent's path (pin herdr/VERSION $pin)" || nope "herdr '$have' is not the pin $pin"
+[[ ! -e "$HOME/.local/bin/herdr" ]] && ok "no herdr in ~/.local/bin (remote-attach install path)" \
+  || nope "a herdr binary sits in ~/.local/bin and can shadow the pinned one"
 brew list --pinned 2>/dev/null | grep -qx herdr && ok "brew pin herdr" || nope "herdr is not brew-pinned"
 
 line="$(herdr integration status 2>/dev/null | grep '^claude:')"
 [[ "$line" == "claude: current"* ]] && ok "integration $line" || nope "integration: '$line'"
 hook="$HOME/.claude/hooks/herdr-agent-state.sh"
 n="$(grep -c "herdr-agent-state.sh' session" "$HOME/.claude/settings.json" 2>/dev/null || true)"
-[[ "$n" == 1 ]] && ok "settings.json has 1 herdr SessionStart hook; hook sha256 $(shasum -a 256 "$hook" | cut -c1-16)" \
+[[ "$n" == 1 && -r "$hook" ]] && ok "settings.json has 1 herdr SessionStart hook; hook sha256 $(shasum -a 256 "$hook" | cut -c1-16)" \
   || nope "settings.json has $n herdr hook entries"
+
+grep -q '^HERDR_ACTION=.* python3 -I - <<' "$hook" && ok "Claude hook runs python3 -I (no cwd on sys.path)" \
+  || nope "Claude hook runs python3 without -I (run herdr/install.sh)"
 
 label=com.broots.herdr-server
 state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tstate =/{print $2; exit}')"
 [[ "$state" == running ]] && ok "launchd $label: running" || nope "launchd $label: '${state:-not loaded}'"
 
-status="$(herdr status server 2>/dev/null)"
+status="$(herdr status server)"
+served="$(awk -F': *' '/^ *version:/{print $2; exit}' <<<"$status")"
 grep -q '^ *status: running' <<<"$status" && ok "server running" || nope "server: $(head -1 <<<"$status")"
+[[ "$served" == "$pin" ]] && ok "running server is the pin ($served)" \
+  || nope "running server is '${served:-?}', not the pin $pin (restart it: launchctl kickstart -k)"
 reply="$(herdr workspace list 2>/dev/null)"
 [[ "$reply" == *'"type":"workspace_list"'* ]] && ok "API socket answers (workspace.list)" || nope "API socket: no workspace_list reply"
 

@@ -6,7 +6,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
-fail() { echo "FAIL herdr: $*" >&2; exit 1; }
+fail() { local m="FAIL herdr: $*"; m="${m//$HOME/~}"; echo "${m//$(id -un)/<user>}" >&2; exit 1; }
 mode() { stat -f %Lp "$1"; }
 
 cfg="$here/herdr/config.toml"
@@ -84,10 +84,48 @@ chmod +x "$t/herdr-refill"
 out="$(HOME="$t/h2" HERDR_BIN="$t/herdr-refill" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server")"
 [[ "$out" == *"clean at exec"* ]] || fail "a cache refilled during the wait reached the server: $out"
 
-# 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010).
-printf '#!/bin/sh\necho "$*" >> "%s/brew-calls"\nexit 0\n' "$t" > "$t/brew"; chmod +x "$t/brew"
-HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" sh "$here/herdr/install.sh" >/dev/null
+# 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010), and fails loudly when the
+#     installed version is not herdr/VERSION (audit run-7).
+cat > "$t/brew" <<S
+#!/bin/sh
+echo "\$*" >> "$t/brew-calls"
+case "\$*" in "list --versions herdr") echo "herdr \${FAKE_HERDR_VERSION}" ;; esac
+exit 0
+S
+chmod +x "$t/brew"
+FAKE_HERDR_VERSION="$(cat "$here/herdr/VERSION")" HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" >/dev/null \
+  || fail "install.sh failed with the pinned version installed"
 grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
+set +e; err="$(FAKE_HERDR_VERSION=9.9.9 HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" 2>&1 >/dev/null)"; rc=$?; set -e
+[[ $rc -ne 0 && "$err" == *"installed 9.9.9, but herdr/VERSION pins"* ]] || fail "install.sh accepted a herdr that is not the pin"
+
+# 4e. install.sh puts herdr's Claude hook in isolated mode, so a json.py in the session's cwd
+#     is not imported (audit run-7); idempotent.
+cp "$here/test/fixtures/herdr-agent-state.sh" "$t/hook.sh"
+mkdir -p "$t/hk/mod"; echo 'import sys; open(sys.argv[0] if False else "'"$t"'/hk/PWNED","w").write("x")' > "$t/hk/mod/json.py"
+HOME="$t/h4" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK="$t/hook.sh" sh "$here/herdr/install.sh" >/dev/null
+HOME="$t/h4" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK="$t/hook.sh" sh "$here/herdr/install.sh" >/dev/null
+[[ "$(grep -c 'python3 -I - <<' "$t/hook.sh")" == 1 ]] || fail "hook not patched to python3 -I exactly once"
+(cd "$t/hk/mod" && echo '{}' | HERDR_ENV=1 HERDR_SOCKET_PATH=/nonexistent HERDR_PANE_ID=w1:p1 bash "$t/hook.sh" session) || true
+[[ ! -e "$t/hk/PWNED" ]] || fail "the patched hook still imported json.py from the session cwd"
+
+# 4f. On n0 a bare `herdr` starts the LaunchAgent's server first instead of its own (audit run-7).
+mkdir -p "$t/z/bin" "$t/z/home/Library/LaunchAgents"; touch "$t/z/home/Library/LaunchAgents/com.broots.herdr-server.plist"
+cat > "$t/z/bin/herdr" <<S
+#!/bin/sh
+echo "herdr \$*" >> "$t/z/calls"
+case "\$*" in "status server") [ -e "$t/z/up" ] && echo "status: running" || echo "status: not running" ;; esac
+S
+cat > "$t/z/bin/launchctl" <<S
+#!/bin/sh
+echo "launchctl \$*" >> "$t/z/calls"; touch "$t/z/up"
+S
+chmod +x "$t/z/bin/herdr" "$t/z/bin/launchctl"
+HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr"
+grep -q "^launchctl kickstart gui/.*/com.broots.herdr-server" "$t/z/calls" || fail "bare herdr did not start the LaunchAgent"
+[[ "$(tail -1 "$t/z/calls")" == "herdr " ]] || fail "bare herdr did not attach after the LaunchAgent started"
+: > "$t/z/calls"; HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr pane list"
+! grep -q launchctl "$t/z/calls" || fail "herdr with arguments touched launchd"
 
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
@@ -101,12 +139,27 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 #     check fails (its output goes into STATE.md of this public repo; audit run-6 finding).
 mkdir -p "$t/vh/bin" "$t/vh/herdr"; chmod 755 "$t/vh/herdr"; echo x > "$t/vh/herdr/herdr.sock"
 for c in herdr brew launchctl; do printf '#!/bin/sh\necho "error at %s/x for %s" >&2\nexit 1\n' "$HOME" "$(id -un)" > "$t/vh/bin/$c"; chmod +x "$t/vh/bin/$c"; done
-set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>/dev/null)"; rc=$?; set -e
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; rc=$?; set -e
 [[ $rc -ne 0 ]] || fail "verify-herdr passed against a broken setup"
 [[ "$out" == *"FAIL"* ]] || fail "verify-herdr printed no FAIL line"
 [[ "$out" != *"$HOME"* ]] || fail "verify-herdr printed the home path"
 [[ "$out" != *"$(id -un)"* ]] || fail "verify-herdr printed the account name"
 [[ "$out" == *"owner me"* ]] || fail "verify-herdr did not say whose the files are"
+
+# 5c. The gate fails when the running server is not the pinned version, even with the right
+#     binary on disk (audit run-7).
+cat > "$t/vh/bin/herdr" <<S
+#!/bin/sh
+case "\$*" in
+  --version) echo "herdr \$(cat "$here/herdr/VERSION")" ;;
+  "status server") printf 'status: running\nversion: 0.0.1\n' ;;
+  *) exit 1 ;;
+esac
+S
+chmod +x "$t/vh/bin/herdr"
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; set -e
+[[ "$out" == *"running server is '0.0.1', not the pin"* ]] || fail "gate did not catch a server older than the pin"
+[[ "$out" == *"at the LaunchAgent's path"* ]] || fail "gate did not check the LaunchAgent's binary"
 
 # 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.
 while IFS= read -r f; do

@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -36,6 +36,19 @@ Last updated: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr nev
   Lead resolved by fixing it: `herdr/install.sh` now `brew pin`s herdr on every Mac, so the
   MacBook's nightly upgrade cannot put a newer client against n0's pinned server over
   `herdr --remote n0` (the run's needs_validation lead `herdr-remote-attach-installs-unpinned-binary-on-n0`).
+  Security audit run-7 (final-run candidate, 2026-11-08): (low) the gate's stderr still carried
+  paths and the account name (shasum on a missing hook, test failures); now `exec 2>/dev/null` in
+  the gate, masked test failures, and test 5b reads 2>&1. (low) The gate checked the binary on
+  PATH, not the running server: it now compares `herdr status server`'s version with the pin,
+  checks /opt/homebrew/bin/herdr (the LaunchAgent's), and fails on a ~/.local/bin/herdr (test 5c).
+  (lead, reproduced and fixed) herdr's Claude hook ran `python3 -`, so a json.py at the root of a
+  repo where Claude starts inside herdr ran on every SessionStart; herdr/install.sh now patches the
+  installed hook to `python3 -I` on every install, and the gate checks it (test 4e).
+  (lead, fixed) herdr/install.sh pinned whatever version was installed and hid a failed pin; it now
+  compares with herdr/VERSION and exits 1 with the fix on a mismatch or a failed pin (test 4d).
+  (lead, fixed where it can be) a bare `herdr` with the server down started its own server from the
+  calling shell; on n0 `herdr` is now a zsh function that starts the LaunchAgent first (test 4f).
+  Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.
