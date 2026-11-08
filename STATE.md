@@ -84,6 +84,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - test/herdr.sh test 3 runs install.sh with HERDR_BREW and HERDR_CLAUDE_HOOK pointed at nothing,
     so the suite no longer re-pins or patches the host's herdr, needs Homebrew's network API, or
     dies on a herdr that is not the pin.
+  - herdr/patch-claude-hook.sh fails loudly (exit 1, temp file removed) when the rewrite fails or
+    the hook's python line matches neither form, instead of printing success; install.sh keeps
+    going after its warning (test 4e2).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

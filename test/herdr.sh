@@ -135,6 +135,18 @@ HOME="$t/h4" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK="$t/hook.sh" 
 (cd "$t/hk/mod" && echo '{}' | HERDR_ENV=1 HERDR_SOCKET_PATH=/nonexistent HERDR_PANE_ID=w1:p1 bash "$t/hook.sh" session) || true
 [[ ! -e "$t/hk/PWNED" ]] || fail "the patched hook still imported json.py from the session cwd"
 
+# 4e2. The patch fails loudly, and leaves no temp file, when it cannot rewrite the hook or the
+#      hook's python line matches neither form (code review 2026-11-08).
+printf '#!/bin/sh\nHERDR_ACTION=x python3 -u - <<PY\nPY\n' > "$t/odd-hook.sh"
+set +e; err="$(HERDR_CLAUDE_HOOK="$t/odd-hook.sh" sh "$here/herdr/patch-claude-hook.sh" 2>&1)"; rc=$?; set -e
+[[ $rc == 1 && "$err" == *"WARNING"* ]] || fail "an unknown hook shape passed silently ($rc)"
+mkdir -p "$t/ro"; cp "$here/test/fixtures/herdr-agent-state.sh" "$t/ro/hook.sh"; chmod 555 "$t/ro"
+set +e; err="$(HERDR_CLAUDE_HOOK="$t/ro/hook.sh" sh "$here/herdr/patch-claude-hook.sh" 2>&1)"; rc=$?; set -e
+chmod 755 "$t/ro"
+[[ $rc == 1 ]] || fail "a failed rewrite exited $rc"
+[[ "$(ls "$t/ro")" == hook.sh ]] || fail "a failed rewrite left a temp file"
+HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/patch-claude-hook.sh" || fail "a missing hook is not an error"
+
 # 4f. On n0 a bare `herdr` starts the LaunchAgent's server first instead of its own (audit run-7).
 mkdir -p "$t/z/bin" "$t/z/home/Library/LaunchAgents"; touch "$t/z/home/Library/LaunchAgents/com.broots.herdr-server.plist"
 cat > "$t/z/bin/herdr" <<S

@@ -34,7 +34,7 @@ if command -v "$BREW" >/dev/null 2>&1 && "$BREW" list --versions herdr >/dev/nul
 fi
 
 # The Claude hook runs python3 -I (isolated), see herdr/patch-claude-hook.sh (audit run-7, run-8).
-sh "${ZSH:-$HOME/.dotfiles}/herdr/patch-claude-hook.sh"
+sh "${ZSH:-$HOME/.dotfiles}/herdr/patch-claude-hook.sh" || true  # it warns; never abort dot
 
 if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
   echo "herdr: config already linked"
