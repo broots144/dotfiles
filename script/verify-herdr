@@ -36,6 +36,16 @@ grep -q '^HERDR_ACTION=.* python3 -I - <<' "$hook" && ok "Claude hook runs pytho
 label=com.broots.herdr-server
 state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tstate =/{print $2; exit}')"
 [[ "$state" == running ]] && ok "launchd $label: running" || nope "launchd $label: '${state:-not loaded}'"
+# Running is not enough: the wrapper waits while a hand- or SSH-started server holds the socket,
+# so the job's own process must be the server itself (the wrapper execs it) and must hold
+# herdr.sock (security audit run-8).
+jpid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tpid =/{print $2; exit}')"
+jcmd="$(ps -o command= -p "${jpid:-0}" 2>/dev/null)"
+[[ -n "$jpid" && "$jcmd" == "$BIN server" ]] && ok "the job's process is '$BIN server'" \
+  || nope "the job's process is '${jcmd:-none}', not '$BIN server' (another server holds the socket?)"
+holders=" $(lsof -t "$HERDR_DIR/herdr.sock" 2>/dev/null | tr '\n' ' ')"
+[[ -n "$jpid" && "$holders" == *" $jpid "* ]] && ok "the job's server holds herdr.sock" \
+  || nope "herdr.sock is held by pid(s)${holders:- none}, not the job's ${jpid:-?}"
 
 status="$(herdr status server)"
 served="$(awk -F': *' '/^ *version:/{print $2; exit}' <<<"$status")"
