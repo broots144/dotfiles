@@ -6,7 +6,8 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
-fail() { local m="FAIL herdr: $*" u; u="$(id -un)"; m="${m//"$HOME"/"~"}"; echo "${m//"$u"/<user>}" >&2; exit 1; }
+TILDE="~"  # from a variable: see script/verify-herdr's say()
+fail() { local m="FAIL herdr: $*" u; u="$(id -un)"; m="${m//"$HOME"/$TILDE}"; echo "${m//"$u"/<user>}" >&2; exit 1; }
 mode() { stat -f %Lp "$1"; }
 
 cfg="$here/herdr/config.toml"
@@ -256,7 +257,9 @@ set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/
 [[ "$out" != *"$HOME"* ]] || fail "verify-herdr printed the home path"
 [[ "$out" != *"$(id -un)"* ]] || fail "verify-herdr printed the account name"
 [[ "$out" == *"owner me"* ]] || fail "verify-herdr did not say whose the files are"
-[[ "$out" == *"~/"* ]] || fail "verify-herdr did not print the home path as ~ (bash tilde-expands an unquoted ~ replacement)"
+hout="$(HOME="$t/vh" PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" /bin/bash "$here/script/verify-herdr" 2>&1)" || true
+[[ "$hout" == *"FAIL ~/herdr is mode"* || "$hout" == *" ~/herdr mode"* ]] || fail "verify-herdr did not print a home path as a bare ~ under /bin/bash"
+[[ "$hout" != *'"~"'* ]] || fail "verify-herdr printed a quoted \"~\""
 
 # 5c. The gate fails when the running server is not the pinned version, even with the right
 #     binary on disk (audit run-7).
