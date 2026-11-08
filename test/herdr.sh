@@ -76,6 +76,17 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 [[ "$(plutil -extract StandardOutPath raw "$p")" == "__HOME__/Library/Logs/herdr-server.log" ]] || fail "log path"
 [[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/bin/herdr-server" ]] || fail "program"
 
+# 5b. script/verify-herdr never prints the home path or the account name, even when every
+#     check fails (its output goes into STATE.md of this public repo; audit run-6 finding).
+mkdir -p "$t/vh/bin" "$t/vh/herdr"; chmod 755 "$t/vh/herdr"; echo x > "$t/vh/herdr/herdr.sock"
+for c in herdr brew launchctl; do printf '#!/bin/sh\necho "error at %s/x for %s" >&2\nexit 1\n' "$HOME" "$(id -un)" > "$t/vh/bin/$c"; chmod +x "$t/vh/bin/$c"; done
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>/dev/null)"; rc=$?; set -e
+[[ $rc -ne 0 ]] || fail "verify-herdr passed against a broken setup"
+[[ "$out" == *"FAIL"* ]] || fail "verify-herdr printed no FAIL line"
+[[ "$out" != *"$HOME"* ]] || fail "verify-herdr printed the home path"
+[[ "$out" != *"$(id -un)"* ]] || fail "verify-herdr printed the account name"
+[[ "$out" == *"owner me"* ]] || fail "verify-herdr did not say whose the files are"
+
 # 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.
 while IFS= read -r f; do
   if grep -Eq 'tmux +(new-session|new|attach|attach-session|a)( |$)' "$f" && ! grep -q 'HERDR_ENV' "$f"; then
