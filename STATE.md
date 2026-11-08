@@ -101,6 +101,8 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - The gate exports HERDR_SOCKET_PATH to the default server's socket, unsets HERDR_SESSION and
     calls the LaunchAgent's binary everywhere, so run from a named-session pane it no longer
     checks that pane's server (test 5d).
+  - bin/herdr-server always removes agent-detection/status.toml, not only with a remote cache, so
+    a failed check no longer fails the gate after every restart (test 4b2).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
