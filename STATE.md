@@ -93,6 +93,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - D-016 supersedes D-015: KeepAlive is SuccessfulExit=false again (always-on respawned herdr
     mid-shutdown after its deliberate exit 0), and the zsh wrapper refuses a plain `herdr server
     stop`, pointing at launchctl kickstart -k or bootout (tests 4f, 5).
+  - The zsh wrapper never falls through to a shell-started server: a failed kickstart or a server
+    not up after 10 s is reported and returns 1, and `--session default`, `--session=default` and
+    `session attach default` count as a bare attach (test 4h).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

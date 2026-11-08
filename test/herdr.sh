@@ -197,6 +197,24 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 [[ "$(plutil -extract StandardOutPath raw "$p")" == "__HOME__/Library/Logs/herdr-server.log" ]] || fail "log path"
 [[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/bin/herdr-server" ]] || fail "program"
 
+# 4h. The wrapper never falls through to a shell-started server: a failed kickstart or a server
+#     that does not come up is reported and returns 1; default-session spellings count as a
+#     bare attach (code review 2026-11-08).
+mkdir -p "$t/w/bin" "$t/w/home/Library/LaunchAgents"; touch "$t/w/home/Library/LaunchAgents/com.broots.herdr-server.plist"
+printf '#!/bin/sh\necho "herdr $*" >> "%s/w/calls"\ncase "$*" in "status server") echo "status: not running" ;; esac\n' "$t" > "$t/w/bin/herdr"
+printf '#!/bin/sh\necho "launchctl $*" >> "%s/w/calls"\n[ -z "$KICK_FAIL" ]\n' "$t" > "$t/w/bin/launchctl"
+chmod +x "$t/w/bin/herdr" "$t/w/bin/launchctl"
+for args in "" "--session default" "--session=default" "session attach default"; do
+  : > "$t/w/calls"; set +e
+  err="$(KICK_FAIL=1 HOME="$t/w/home" PATH="$t/w/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr $args" 2>&1)"; rc=$?; set -e
+  [[ $rc == 1 && "$err" == *"kickstart"*"failed"* ]] || fail "herdr '$args' with a failed kickstart: rc $rc"
+  ! grep -qv -e '^herdr status server$' -e '^launchctl ' "$t/w/calls" || fail "herdr '$args' reached herdr after a failed kickstart"
+done
+: > "$t/w/calls"; set +e
+err="$(HERDR_ATTACH_WAIT_TICKS=2 HOME="$t/w/home" PATH="$t/w/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr" 2>&1)"; rc=$?; set -e
+[[ $rc == 1 && "$err" == *"not up yet"* ]] || fail "a server that never came up was not reported"
+! grep -qx 'herdr ' "$t/w/calls" || fail "the wrapper attached (and so autostarted) anyway"
+
 # 5a. Every Mac re-patches the hook whenever it changes, whatever rewrote it (code review).
 p="$here/macos/com.broots.herdr-hook-patch.plist"
 plutil -lint -s "$p"
