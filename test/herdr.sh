@@ -191,6 +191,13 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 [[ "$(plutil -extract StandardOutPath raw "$p")" == "__HOME__/Library/Logs/herdr-server.log" ]] || fail "log path"
 [[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/bin/herdr-server" ]] || fail "program"
 
+# 5a. Every Mac re-patches the hook whenever it changes, whatever rewrote it (code review).
+p="$here/macos/com.broots.herdr-hook-patch.plist"
+plutil -lint -s "$p"
+! grep -q 'dotfiles-hosts' "$p" || fail "the hook-patch agent must run on every Mac"
+[[ "$(plutil -extract WatchPaths.0 raw "$p")" == "__HOME__/.claude/hooks/herdr-agent-state.sh" ]] || fail "hook-patch watches the wrong path"
+[[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/herdr/patch-claude-hook.sh" ]] || fail "hook-patch runs the wrong program"
+
 # 5b. script/verify-herdr never prints the home path or the account name, even when every
 #     check fails (its output goes into STATE.md of this public repo; audit run-6 finding).
 mkdir -p "$t/vh/bin" "$t/vh/herdr"; chmod 755 "$t/vh/herdr"; echo x > "$t/vh/herdr/herdr.sock"

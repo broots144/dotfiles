@@ -87,6 +87,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - herdr/patch-claude-hook.sh fails loudly (exit 1, temp file removed) when the rewrite fails or
     the hook's python line matches neither form, instead of printing success; install.sh keeps
     going after its warning (test 4e2).
+  - New LaunchAgent com.broots.herdr-hook-patch (every Mac): WatchPaths on the Claude hook runs
+    herdr/patch-claude-hook.sh whenever herdr rewrites it from the CLI, the TUI or the API; the
+    gate checks it is loaded (test 5a).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

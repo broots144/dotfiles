@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent: keep herdr's Claude hook in isolated mode (python3 -I, D-014) whatever rewrote it.
+  herdr rewrites ~/.claude/hooks/herdr-agent-state.sh on every integration install, from the CLI,
+  the TUI's Settings > Integrations or the API, and only the zsh wrapper's CLI path re-patched it
+  until the next `dot` (code review 2026-11-08). launchd runs the patch whenever the file changes;
+  the patch's own rewrite triggers one more run, which finds -I and does nothing. Every Mac.
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.herdr-hook-patch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__HOME__/.dotfiles/herdr/patch-claude-hook.sh</string>
+    </array>
+
+    <key>WatchPaths</key>
+    <array>
+        <string>__HOME__/.claude/hooks/herdr-agent-state.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/herdr-hook-patch.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/herdr-hook-patch.log</string>
+</dict>
+</plist>
