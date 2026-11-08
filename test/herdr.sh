@@ -108,14 +108,16 @@ out="$(HOME="$t/h2" HERDR_BIN="$t/herdr-refill" HERDR_SERVER_WAIT_S=0 HERDR_STAT
 [[ "$out" == *"clean at exec"* ]] || fail "a cache refilled during the wait reached the server: $out"
 
 # 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010), and fails loudly when the
-#     installed version is not herdr/VERSION (audit run-7).
+#     installed version is not herdr/VERSION (audit run-7). The version is the binary's own, not
+#     the keg name, which carries Homebrew revisions (0.9.5_1; code review 2026-11-08).
 cat > "$t/brew" <<S
 #!/bin/sh
 echo "\$*" >> "$t/brew-calls"
-case "\$*" in "list --versions herdr") echo "herdr \${FAKE_HERDR_VERSION}" ;; esac
+case "\$*" in "list --versions herdr") echo "herdr \${FAKE_HERDR_VERSION}_1" ;; --prefix) echo "$t/bp" ;; esac
 exit 0
 S
-chmod +x "$t/brew"
+mkdir -p "$t/bp/opt/herdr/bin"; printf '#!/bin/sh\necho "herdr $FAKE_HERDR_VERSION"\n' > "$t/bp/opt/herdr/bin/herdr"
+chmod +x "$t/brew" "$t/bp/opt/herdr/bin/herdr"
 FAKE_HERDR_VERSION="$(cat "$here/herdr/VERSION")" HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" >/dev/null \
   || fail "install.sh failed with the pinned version installed"
 grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
