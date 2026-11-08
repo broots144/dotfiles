@@ -4,8 +4,12 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 bad=0
-# Paths print as ~/...: this output is pasted into STATE.md of a public repo.
-say()  { local m="$*"; echo "${m//$HOME/~}"; }
+# This output is pasted into STATE.md of a public repo: paths print as ~/..., owners as
+# "me"/"other" (never a name), and the account name is masked anyway as a backstop.
+ME="$(id -un)"; UID_ME="$(id -u)"
+HERDR_DIR="${HERDR_DIR:-$HOME/.config/herdr}"
+say()  { local m="$*"; m="${m//$HOME/~}"; echo "${m//$ME/<user>}"; }
+owner() { [[ "$1" == "$UID_ME" ]] && echo me || echo other; }
 ok()   { say "ok   $*"; }
 nope() { say "FAIL $*"; bad=1; }
 
@@ -28,14 +32,16 @@ state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tsta
 status="$(herdr status server 2>/dev/null)"
 grep -q '^ *status: running' <<<"$status" && ok "server running" || nope "server: $(head -1 <<<"$status")"
 reply="$(herdr workspace list 2>/dev/null)"
-[[ "$reply" == *'"type":"workspace_list"'* ]] && ok "API socket answers (workspace.list)" || nope "API socket: '${reply:0:80}'"
+[[ "$reply" == *'"type":"workspace_list"'* ]] && ok "API socket answers (workspace.list)" || nope "API socket: no workspace_list reply"
 
-dir="$HOME/.config/herdr"
-m="$(stat -f '%Lp %Su' "$dir")"
-[[ "$m" == "700 $(id -un)" ]] && ok "$dir mode 700, owner me" || nope "$dir is '$m'"
+dir="$HERDR_DIR"
+read -r mode uid <<<"$(stat -f '%Lp %u' "$dir" 2>/dev/null)"
+[[ "$mode $uid" == "700 $UID_ME" ]] && ok "$dir mode 700, owner me" || nope "$dir is mode ${mode:-?}, owner $(owner "${uid:-}")"
 for s in herdr.sock herdr-client.sock; do
-  m="$(stat -f '%HT %Lp %Su' "$dir/$s" 2>/dev/null)"
-  [[ "$m" == "Socket 600 $(id -un)" ]] && ok "$s: socket 600, owner me" || nope "$s: '$m'"
+  if [[ -S "$dir/$s" ]]; then kind=socket; else kind=not-a-socket; fi
+  read -r mode uid <<<"$(stat -f '%Lp %u' "$dir/$s" 2>/dev/null)"
+  [[ "$kind $mode $uid" == "socket 600 $UID_ME" ]] && ok "$s: socket 600, owner me" \
+    || nope "$s: $kind, mode ${mode:-?}, owner $(owner "${uid:-}")"
 done
 [[ "$(readlink "$dir/config.toml")" == "$HOME/.dotfiles/herdr/config.toml" ]] && ok "config.toml linked to dotfiles" \
   || nope "config.toml is not the dotfiles link"

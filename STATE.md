@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -27,6 +27,15 @@ Last updated: 2026-11-08 by Claude (herdr agent-detection rules bundled only, D-
   remote rule cache, the gate checks every rule is `bundled`; the Phase 0 `p0test` session that had
   refilled that cache from herdr.dev is stopped and deleted, the cache removed, rules reloaded on
   n0 2026-11-08). Audits run target code only in the sandbox of D-013.
+  Security audit run-6 (2026-11-08, ~/security-audit-skill/dotfiles/run-6, scoped to the herdr
+  work): 2 confirmed, both fixed on `herdr/audit-run6-fixes`, each with a regression test in
+  test/herdr.sh: (low) `script/verify-herdr` printed the account name in FAIL lines that go into
+  this public STATE.md (it now compares uids and says owner me/other, and masks the name anyway);
+  (informational) the D-012 cache purge ran before the wait for a hand-started server (now right
+  before exec; docs restart the server with `launchctl kickstart`, never a bare `herdr`).
+  Lead resolved by fixing it: `herdr/install.sh` now `brew pin`s herdr on every Mac, so the
+  MacBook's nightly upgrade cannot put a newer client against n0's pinned server over
+  `herdr --remote n0` (the run's needs_validation lead `herdr-remote-attach-installs-unpinned-binary-on-n0`).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.

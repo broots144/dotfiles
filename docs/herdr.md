@@ -37,8 +37,9 @@ herdr                 # attach to the default session (the LaunchAgent keeps it 
 - Detach: `ctrl+b q`. Panes and agents keep running in the server.
 - Reattach: `herdr` again, from any terminal.
 - Stop everything (ends every pane): `herdr server stop`. The LaunchAgent does not restart a
-  clean stop; start it again with `herdr` or
-  `launchctl kickstart gui/$(id -u)/com.broots.herdr-server`.
+  clean stop; start it again with `launchctl kickstart gui/$(id -u)/com.broots.herdr-server`
+  (not a bare `herdr`, which would start a server outside the LaunchAgent's fixed environment and
+  without its D-012 cache purge). Restart in one step: `launchctl kickstart -k gui/$(id -u)/com.broots.herdr-server`.
 - After a server restart herdr restores the layout and resumes Claude sessions into their
   conversations (`resume_agents_on_restore`). Screen history is not saved to disk
   (`pane_history = false`), on purpose.
@@ -104,4 +105,6 @@ herdr --version > /dev/null && herdr integration install claude   # refresh the 
 ```
 
 update `herdr/VERSION`, run `just verify-phase-8`, and restart the server when no agent is
-mid-task (`herdr server stop`, then `herdr`).
+mid-task: `launchctl kickstart -k gui/$(id -u)/com.broots.herdr-server`. Do the same on the
+MacBook (`herdr/install.sh` pins herdr there too), so `herdr --remote n0` never meets a newer
+client.

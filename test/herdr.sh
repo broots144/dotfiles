@@ -68,6 +68,27 @@ HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" 
 [[ ! -e "$t/st/agent-detection/remote" && ! -e "$t/st/agent-detection/status.toml" ]] || fail "remote rule cache left in place"
 [[ -d "$t/st/agent-detection/local" ]] || fail "herdr-server removed more than the remote cache"
 
+# 4c. ...even when the cache is refilled while it waits for a hand-started server (audit run-6).
+: > "$t/calls"; echo 0 > "$t/n"; rm -rf "$t/st"; mkdir -p "$t/st/agent-detection"
+cat > "$t/herdr-refill" <<S
+#!/bin/sh
+case "\$*" in
+  "status server") n=\$(cat "$t/n"); echo \$((n + 1)) > "$t/n"
+    mkdir -p "$t/st/agent-detection/remote"; touch "$t/st/agent-detection/remote/claude.toml"
+    [ "\$n" -lt 2 ] && echo "status: running" || echo "status: not running" ;;
+  --version) echo "herdr 0.0.0" ;;
+  server) [ -e "$t/st/agent-detection/remote" ] && echo "CACHE PRESENT AT EXEC" || echo "clean at exec" ;;
+esac
+S
+chmod +x "$t/herdr-refill"
+out="$(HOME="$t/h2" HERDR_BIN="$t/herdr-refill" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server")"
+[[ "$out" == *"clean at exec"* ]] || fail "a cache refilled during the wait reached the server: $out"
+
+# 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010).
+printf '#!/bin/sh\necho "$*" >> "%s/brew-calls"\nexit 0\n' "$t" > "$t/brew"; chmod +x "$t/brew"
+HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" sh "$here/herdr/install.sh" >/dev/null
+grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
+
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"
@@ -75,6 +96,17 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 [[ "$(plutil -extract KeepAlive.SuccessfulExit raw "$p")" == false ]] || fail "KeepAlive must be SuccessfulExit=false"
 [[ "$(plutil -extract StandardOutPath raw "$p")" == "__HOME__/Library/Logs/herdr-server.log" ]] || fail "log path"
 [[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/bin/herdr-server" ]] || fail "program"
+
+# 5b. script/verify-herdr never prints the home path or the account name, even when every
+#     check fails (its output goes into STATE.md of this public repo; audit run-6 finding).
+mkdir -p "$t/vh/bin" "$t/vh/herdr"; chmod 755 "$t/vh/herdr"; echo x > "$t/vh/herdr/herdr.sock"
+for c in herdr brew launchctl; do printf '#!/bin/sh\necho "error at %s/x for %s" >&2\nexit 1\n' "$HOME" "$(id -un)" > "$t/vh/bin/$c"; chmod +x "$t/vh/bin/$c"; done
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>/dev/null)"; rc=$?; set -e
+[[ $rc -ne 0 ]] || fail "verify-herdr passed against a broken setup"
+[[ "$out" == *"FAIL"* ]] || fail "verify-herdr printed no FAIL line"
+[[ "$out" != *"$HOME"* ]] || fail "verify-herdr printed the home path"
+[[ "$out" != *"$(id -un)"* ]] || fail "verify-herdr printed the account name"
+[[ "$out" == *"owner me"* ]] || fail "verify-herdr did not say whose the files are"
 
 # 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.
 while IFS= read -r f; do

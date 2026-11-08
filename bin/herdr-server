@@ -16,15 +16,6 @@ WAIT_S="${HERDR_SERVER_WAIT_S:-30}"
 mkdir -p "$HERDR_DIR/sessions"
 chmod 700 "$HERDR_DIR" "$HERDR_DIR/sessions"
 
-# Agent-detection rules come from the pinned binary only (D-012). A remote rule cache can exist
-# only if some herdr ran with manifest_check on (a session started before this config, or by
-# hand): drop it so the server never loads rules nobody pinned.
-STATE_DIR="${HERDR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr}"
-if [[ -d "$STATE_DIR/agent-detection/remote" ]]; then
-  echo "$(date -u +%FT%TZ) herdr-server: removing the remote agent-detection cache (D-012)"
-  rm -rf "$STATE_DIR/agent-detection/remote" "$STATE_DIR/agent-detection/status.toml"
-fi
-
 running() {
   "$HERDR_BIN" status server 2>/dev/null | grep -q '^ *status: running'
 }
@@ -32,6 +23,16 @@ running() {
 while running; do
   sleep "$WAIT_S"
 done
+
+# Agent-detection rules come from the pinned binary only (D-012). Purged last, right before exec,
+# so a cache refilled while we waited for a hand-started server is gone too. A remote cache can exist
+# only if some herdr ran with manifest_check on (a session started before this config, or by
+# hand): drop it so the server never loads rules nobody pinned.
+STATE_DIR="${HERDR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr}"
+if [[ -d "$STATE_DIR/agent-detection/remote" ]]; then
+  echo "$(date -u +%FT%TZ) herdr-server: removing the remote agent-detection cache (D-012)"
+  rm -rf "$STATE_DIR/agent-detection/remote" "$STATE_DIR/agent-detection/status.toml"
+fi
 
 echo "$(date -u +%FT%TZ) herdr-server: starting $("$HERDR_BIN" --version 2>/dev/null)"
 exec "$HERDR_BIN" server
