@@ -92,6 +92,11 @@ HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" 
 [[ ! -e "$t/st/agent-detection/remote" && ! -e "$t/st/agent-detection/status.toml" ]] || fail "remote rule cache left in place"
 [[ -d "$t/st/agent-detection/local" ]] || fail "herdr-server removed more than the remote cache"
 
+# 4b2. ...and a lone status.toml from a failed check goes too (code review 2026-11-08).
+rm -rf "$t/st"; mkdir -p "$t/st/agent-detection"; touch "$t/st/agent-detection/status.toml"; echo 2 > "$t/n"
+HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server" >/dev/null
+[[ ! -e "$t/st/agent-detection/status.toml" ]] || fail "a lone status.toml survived the restart"
+
 # 4c. ...even when the cache is refilled while it waits for a hand-started server (audit run-6).
 : > "$t/calls"; echo 0 > "$t/n"; rm -rf "$t/st"; mkdir -p "$t/st/agent-detection"
 cat > "$t/herdr-refill" <<S

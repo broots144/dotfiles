@@ -31,8 +31,11 @@ done
 STATE_DIR="${HERDR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr}"
 if [[ -d "$STATE_DIR/agent-detection/remote" ]]; then
   echo "$(date -u +%FT%TZ) herdr-server: removing the remote agent-detection cache (D-012)"
-  rm -rf "$STATE_DIR/agent-detection/remote" "$STATE_DIR/agent-detection/status.toml"
+  rm -rf "$STATE_DIR/agent-detection/remote"
 fi
+# A failed check writes status.toml without remote/; left in place it failed the gate's
+# "last check: never" test after every restart (code review 2026-11-08).
+rm -f "$STATE_DIR/agent-detection/status.toml"
 
 echo "$(date -u +%FT%TZ) herdr-server: starting $("$HERDR_BIN" --version 2>/dev/null)"
 # `herdr --remote` offers to restart (and so end every pane of) a server that is not a session
