@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -347,6 +347,32 @@ verify-phase-8 ok
 ```
 
 ## Security grade
+
+### herdr scope (security-audit skill, 2026-11-08): grade **A**
+
+Grade A as set for this task: zero open confirmed, zero open needs_validation, a final full run
+after the last fix with nothing new, and hardening fixed where cheap or listed (D-020). Runs are
+in `~/security-audit-skill/dotfiles/run-N` (never committed); `just verify-security` re-runs
+the skill's validators on the newest one and prints its counts.
+
+| Run | Status | Result |
+|---|---|---|
+| run-5 | incomplete (fork agents could not spawn hunters) | none |
+| run-6 | complete | confirmed: 1 low (gate printed the owner name), 1 informational (D-012 purge not bound to the start); needs_validation: 2 (unpinned remote attach, pane-socket keystrokes) |
+| run-7 | incomplete, superseded | candidates: 2 low (gate stderr, gate checked PATH binary), 3 leads (hook cwd import, unenforced pin, bare `herdr` autostart) |
+| run-8 | incomplete, superseded | candidates: 1 low confirmed (gate not bound to the serving process), 4 needs_validation (attach autostart, hook reinstall drops -I, remote install, pane-socket) |
+| run-9 | superseded after recon (code review changed the code) | none |
+| run-10 | incomplete, superseded | candidates: 1 needs_validation (pin guard missed `--session x machine`) |
+| run-11 | **complete, final** | confirmed 0, needs_validation 0, rejected 1 (pane-socket keystroke injection: same uid, Claude Code already unsandboxed with bypassPermissions) |
+
+Fixed, each with its own commit and test: #27 (run-6), #28 (run-7), #29 (run-8: gate bound to
+the job, `--remote` pin guard and hook re-patch, KeepAlive), #30/#31 (/code-review max: 16
+fixes incl. no reload on every `dot`, setsid shim, hook WatchPaths agent, placeholder for the
+remote rule cache, config copied), #32 (run-10: immutable `~/.local/bin/herdr`, D-019).
+Rejected with evidence: the pane-socket keystroke lead (run-11 v01, Phase 5 verified).
+/code-review: `max` on 04f6017..master, 15 findings confirmed, all fixed in #30/#31.
+
+### Earlier repo-wide review
 
 Current grade: **A** (security review 2026-11-07 r3; rubric: A = no open Medium or higher and
 every open Low documented with a reason; A+ also needs no open finding above Informational).
