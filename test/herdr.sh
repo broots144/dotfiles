@@ -60,6 +60,14 @@ out="$(HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 /bin/bash "$here/
 [[ "$(tail -1 "$t/calls")" == server ]] || fail "herdr-server did not exec herdr server last"
 [[ "$out" == *served* ]] || fail "herdr-server output: $out"
 
+# 4b. ...and drops a remote agent-detection cache before starting (D-012), leaving the rest.
+mkdir -p "$t/st/agent-detection/remote" "$t/st/agent-detection/local"
+touch "$t/st/agent-detection/remote/claude.toml" "$t/st/agent-detection/status.toml"
+: > "$t/calls"; echo 2 > "$t/n"
+HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server" >/dev/null
+[[ ! -e "$t/st/agent-detection/remote" && ! -e "$t/st/agent-detection/status.toml" ]] || fail "remote rule cache left in place"
+[[ -d "$t/st/agent-detection/local" ]] || fail "herdr-server removed more than the remote cache"
+
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"

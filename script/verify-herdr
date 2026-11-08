@@ -40,6 +40,12 @@ done
 [[ "$(readlink "$dir/config.toml")" == "$HOME/.dotfiles/herdr/config.toml" ]] && ok "config.toml linked to dotfiles" \
   || nope "config.toml is not the dotfiles link"
 herdr config check >/dev/null 2>&1 && ok "herdr config check" || nope "herdr config check"
+man="$(herdr server agent-manifests 2>/dev/null)"
+if [[ -n "$man" ]] && ! awk 'NR>3 && NF {print $2}' <<<"$man" | grep -qv '^bundled$' && grep -q '^last check: never' <<<"$man"; then
+  ok "agent-detection rules: all bundled with the pinned binary, never checked remotely (D-012)"
+else
+  nope "agent-detection rules not all bundled, or a remote check ran: $(head -1 <<<"$man")"
+fi
 
 (( bad )) && { echo "verify-phase-8 FAILED"; exit 1; }
 echo "verify-phase-8 ok"

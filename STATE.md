@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -23,7 +23,11 @@ Last updated: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on
   idle as a green ring. No shell file auto-attaches tmux; `test/herdr.sh` fails on one that would
   without the `HERDR_ENV` guard. `herdr/config.toml` (linked by `herdr/install.sh`), the n0
   LaunchAgent `com.broots.herdr-server` (`bin/herdr-server`, sets `~/.config/herdr` to 0700) and
-  the gate `just verify-phase-8` (alias `verify-herdr`) are merged (PR #24) and deployed on n0
+  agent-detection rules come only from the pinned binary (D-012: `bin/herdr-server` drops a
+  remote rule cache, the gate checks every rule is `bundled`; the Phase 0 `p0test` session that had
+  refilled that cache from herdr.dev is stopped and deleted, the cache removed, rules reloaded on
+  n0 2026-11-08). Audits run target code only in the sandbox of D-013.
+  The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.
 - Deployed by symlink: `~/.dotfiles -> ~/dev/dotfiles` on n0. `script/bootstrap` links `*.symlink`
