@@ -41,6 +41,9 @@ Last updated: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-ru
   the gate, masked test failures, and test 5b reads 2>&1. (low) The gate checked the binary on
   PATH, not the running server: it now compares `herdr status server`'s version with the pin,
   checks /opt/homebrew/bin/herdr (the LaunchAgent's), and fails on a ~/.local/bin/herdr (test 5c).
+  (lead, reproduced and fixed) herdr's Claude hook ran `python3 -`, so a json.py at the root of a
+  repo where Claude starts inside herdr ran on every SessionStart; herdr/install.sh now patches the
+  installed hook to `python3 -I` on every install, and the gate checks it (test 4e).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.

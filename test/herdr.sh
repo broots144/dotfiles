@@ -89,6 +89,16 @@ printf '#!/bin/sh\necho "$*" >> "%s/brew-calls"\nexit 0\n' "$t" > "$t/brew"; chm
 HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" sh "$here/herdr/install.sh" >/dev/null
 grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
 
+# 4e. install.sh puts herdr's Claude hook in isolated mode, so a json.py in the session's cwd
+#     is not imported (audit run-7); idempotent.
+cp "$here/test/fixtures/herdr-agent-state.sh" "$t/hook.sh"
+mkdir -p "$t/hk/mod"; echo 'import sys; open(sys.argv[0] if False else "'"$t"'/hk/PWNED","w").write("x")' > "$t/hk/mod/json.py"
+HOME="$t/h4" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK="$t/hook.sh" sh "$here/herdr/install.sh" >/dev/null
+HOME="$t/h4" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK="$t/hook.sh" sh "$here/herdr/install.sh" >/dev/null
+[[ "$(grep -c 'python3 -I - <<' "$t/hook.sh")" == 1 ]] || fail "hook not patched to python3 -I exactly once"
+(cd "$t/hk/mod" && echo '{}' | HERDR_ENV=1 HERDR_SOCKET_PATH=/nonexistent HERDR_PANE_ID=w1:p1 bash "$t/hook.sh" session) || true
+[[ ! -e "$t/hk/PWNED" ]] || fail "the patched hook still imported json.py from the session cwd"
+
 # 5. The LaunchAgent: n0 only, restart on crash only, logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"

@@ -30,6 +30,9 @@ n="$(grep -c "herdr-agent-state.sh' session" "$HOME/.claude/settings.json" 2>/de
 [[ "$n" == 1 && -r "$hook" ]] && ok "settings.json has 1 herdr SessionStart hook; hook sha256 $(shasum -a 256 "$hook" | cut -c1-16)" \
   || nope "settings.json has $n herdr hook entries"
 
+grep -q '^HERDR_ACTION=.* python3 -I - <<' "$hook" && ok "Claude hook runs python3 -I (no cwd on sys.path)" \
+  || nope "Claude hook runs python3 without -I (run herdr/install.sh)"
+
 label=com.broots.herdr-server
 state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tstate =/{print $2; exit}')"
 [[ "$state" == running ]] && ok "launchd $label: running" || nope "launchd $label: '${state:-not loaded}'"
