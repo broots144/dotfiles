@@ -60,6 +60,29 @@ out="$(HOME="$t/h2" HERDR_BIN="$t/herdr" HERDR_SERVER_WAIT_S=0 /bin/bash "$here/
 [[ "$(tail -1 "$t/calls")" == server ]] || fail "herdr-server did not exec herdr server last"
 [[ "$out" == *served* ]] || fail "herdr-server output: $out"
 
+# 4a. ...as a session leader (herdr --remote would offer to restart it otherwise), from a launchd
+#     job that stays the parent, forwards TERM and exits with the server's status (D-017).
+cat > "$t/herdr-sess" <<'S'
+#!/bin/sh
+case "$*" in
+  "status server") echo "status: not running" ;;
+  --version) echo "herdr 0.0.0" ;;
+  server) # python runs as a child of this shell: its parent must be the session leader
+    python3 -c 'import os; print("leader", os.getsid(0) == os.getppid())'
+    [ -n "$WAIT_TERM" ] && { trap 'echo got TERM >> "$WAIT_TERM"; exit 0' TERM; : > "$WAIT_TERM.up"; while :; do sleep 0.1; done; }
+    exit 3 ;;
+esac
+S
+chmod +x "$t/herdr-sess"
+set +e; out="$(HOME="$t/h2" HERDR_BIN="$t/herdr-sess" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st0" /bin/bash "$here/bin/herdr-server")"; rc=$?; set -e
+[[ "$out" == *"leader True"* ]] || fail "the server is not a session leader: $out"
+[[ $rc == 3 ]] || fail "herdr-server did not exit with the server's status ($rc)"
+HOME="$t/h2" HERDR_BIN="$t/herdr-sess" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st0" WAIT_TERM="$t/term" /bin/bash "$here/bin/herdr-server" >/dev/null & sp=$!
+for _ in $(seq 50); do [[ -e "$t/term.up" ]] && break; sleep 0.1; done
+kill -TERM "$sp"; set +e; wait "$sp"; rc=$?; set -e
+grep -q "got TERM" "$t/term" || fail "herdr-server did not forward TERM to the server"
+[[ $rc == 0 ]] || fail "a clean stop after TERM exited $rc"
+
 # 4b. ...and drops a remote agent-detection cache before starting (D-012), leaving the rest.
 mkdir -p "$t/st/agent-detection/remote" "$t/st/agent-detection/local"
 touch "$t/st/agent-detection/remote/claude.toml" "$t/st/agent-detection/status.toml"
@@ -195,7 +218,8 @@ chmod +x "$t/vh/bin/herdr" "$t/vh/bin/launchctl"
 set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; set -e
 kill "$wpid" 2>/dev/null || true
 [[ "$out" == *"launchd com.broots.herdr-server: running"* ]] || fail "5d: fake launchd not seen as running"
-[[ "$out" == *"FAIL the job's process is 'sleep 30'"* ]] || fail "gate accepted a job process that is not the server"
+[[ "$out" == *"FAIL the job has no '$t/vh/bin/herdr server' child"* ]] || fail "gate accepted a job with no server child"
+[[ "$out" == *"FAIL server is not a session leader"* ]] || fail "gate did not check detached_server_daemon"
 [[ "$out" == *"FAIL herdr.sock is held by"* ]] || fail "gate accepted a socket the job does not hold"
 
 # 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.

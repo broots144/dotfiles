@@ -35,4 +35,15 @@ if [[ -d "$STATE_DIR/agent-detection/remote" ]]; then
 fi
 
 echo "$(date -u +%FT%TZ) herdr-server: starting $("$HERDR_BIN" --version 2>/dev/null)"
-exec "$HERDR_BIN" server
+# `herdr --remote` offers to restart (and so end every pane of) a server that is not a session
+# leader: upstream checks getsid(0) == getpid() (detached_server_daemon). A launchd job is a
+# process-group leader and cannot call setsid itself, and macOS has no setsid command. So this
+# process (the launchd job) forks: the child calls setsid and execs the server; the parent
+# forwards TERM, INT, HUP and QUIT and exits with the server's status (D-017).
+exec /usr/bin/perl -MPOSIX -e '
+  my $pid = fork() // die "herdr-server: fork: $!\n";
+  if ($pid == 0) { POSIX::setsid() >= 0 or die "herdr-server: setsid: $!\n"; exec @ARGV or die "herdr-server: exec: $!\n"; }
+  for my $s (qw(TERM INT HUP QUIT)) { $SIG{$s} = sub { kill $s, $pid } }
+  while (1) { my $w = waitpid($pid, 0); last if $w == $pid; exit 1 if $w == -1 && $!{ECHILD}; }
+  exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+' "$HERDR_BIN" server
