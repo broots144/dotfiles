@@ -112,6 +112,16 @@ done
 
 export ZSH=$HOME/.dotfiles
 
+# Install from the newest dotfiles, not whatever this Mac last pulled (D-021). When the pull
+# moved HEAD, run the new copy of dot itself once.
+if [ -z "${DOT_SELF_UPDATED:-}" ]; then
+	rc=0
+	"$dotfilesDirectory/script/self-update" "$dotfilesDirectory" || rc=$?
+	if [ "$rc" -eq 10 ]; then
+		DOT_SELF_UPDATED=1 exec "$dotfilesDirectory/bin/dot"
+	fi
+fi
+
 # Set macOS defaults
 $ZSH/macos/set-defaults.sh
 
