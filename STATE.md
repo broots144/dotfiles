@@ -44,6 +44,8 @@ Last updated: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-ru
   (lead, reproduced and fixed) herdr's Claude hook ran `python3 -`, so a json.py at the root of a
   repo where Claude starts inside herdr ran on every SessionStart; herdr/install.sh now patches the
   installed hook to `python3 -I` on every install, and the gate checks it (test 4e).
+  (lead, fixed) herdr/install.sh pinned whatever version was installed and hid a failed pin; it now
+  compares with herdr/VERSION and exits 1 with the fix on a mismatch or a failed pin (test 4d).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.

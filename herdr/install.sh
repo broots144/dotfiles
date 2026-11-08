@@ -16,9 +16,18 @@ chmod 700 "$dir"
 
 # Same pinned herdr on every Mac (D-010): `brew pin` is per machine, and an unpinned MacBook would
 # upgrade herdr nightly and meet n0's pinned server with a newer client over `herdr --remote n0`.
+# The pin is herdr/VERSION, not whatever happens to be installed: a mismatch is reported loudly
+# and this installer exits 1 at the end, so `dot` shows it (security audit run-7).
 BREW="${HERDR_BREW:-brew}"
+want="$(cat "${ZSH:-$HOME/.dotfiles}/herdr/VERSION")"
+version_ok=1
 if command -v "$BREW" >/dev/null 2>&1 && "$BREW" list --versions herdr >/dev/null 2>&1; then
-  "$BREW" pin herdr >/dev/null 2>&1 && echo "herdr: brew pin herdr"
+  have="$("$BREW" list --versions herdr | awk '{print $NF}')"
+  if "$BREW" pin herdr >/dev/null 2>&1; then echo "herdr: brew pin herdr ($have)"; else echo "herdr: brew pin herdr FAILED" >&2; version_ok=0; fi
+  if [ "$have" != "$want" ]; then
+    echo "herdr: installed $have, but herdr/VERSION pins $want: brew unpin herdr && brew upgrade herdr (or install $want), then rerun" >&2
+    version_ok=0
+  fi
 fi
 
 # herdr's Claude hook runs `python3 -`, which puts the session's working directory first on
@@ -34,6 +43,7 @@ fi
 
 if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
   echo "herdr: config already linked"
+  [ "$version_ok" = 1 ] || exit 1
   exit 0
 fi
 if [ -e "$dst" ] && [ ! -L "$dst" ]; then
@@ -42,3 +52,4 @@ if [ -e "$dst" ] && [ ! -L "$dst" ]; then
 fi
 ln -sfn "$src" "$dst"
 echo "herdr: linked $dst -> $src"
+[ "$version_ok" = 1 ] || exit 1

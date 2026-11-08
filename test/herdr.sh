@@ -84,10 +84,20 @@ chmod +x "$t/herdr-refill"
 out="$(HOME="$t/h2" HERDR_BIN="$t/herdr-refill" HERDR_SERVER_WAIT_S=0 HERDR_STATE_DIR="$t/st" /bin/bash "$here/bin/herdr-server")"
 [[ "$out" == *"clean at exec"* ]] || fail "a cache refilled during the wait reached the server: $out"
 
-# 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010).
-printf '#!/bin/sh\necho "$*" >> "%s/brew-calls"\nexit 0\n' "$t" > "$t/brew"; chmod +x "$t/brew"
-HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" sh "$here/herdr/install.sh" >/dev/null
+# 4d. herdr/install.sh pins herdr in Homebrew on every Mac (D-010), and fails loudly when the
+#     installed version is not herdr/VERSION (audit run-7).
+cat > "$t/brew" <<S
+#!/bin/sh
+echo "\$*" >> "$t/brew-calls"
+case "\$*" in "list --versions herdr") echo "herdr \${FAKE_HERDR_VERSION}" ;; esac
+exit 0
+S
+chmod +x "$t/brew"
+FAKE_HERDR_VERSION="$(cat "$here/herdr/VERSION")" HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" >/dev/null \
+  || fail "install.sh failed with the pinned version installed"
 grep -qx "pin herdr" "$t/brew-calls" || fail "install.sh did not brew pin herdr"
+set +e; err="$(FAKE_HERDR_VERSION=9.9.9 HOME="$t/h3" ZSH="$here" HERDR_BREW="$t/brew" HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" 2>&1 >/dev/null)"; rc=$?; set -e
+[[ $rc -ne 0 && "$err" == *"installed 9.9.9, but herdr/VERSION pins"* ]] || fail "install.sh accepted a herdr that is not the pin"
 
 # 4e. install.sh puts herdr's Claude hook in isolated mode, so a json.py in the session's cwd
 #     is not imported (audit run-7); idempotent.
