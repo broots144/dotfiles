@@ -5,7 +5,7 @@
 # auto-attaches tmux inside a herdr pane (herdr docs: agents.mdx, guard with HERDR_ENV).
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
-t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
+t="$(mktemp -d)"; trap 'find "$t" -flags +uchg -exec chflags -h nouchg {} + 2>/dev/null; rm -rf "$t"' EXIT
 TILDE="~"  # from a variable: see script/verify-herdr's say()
 fail() { local m="FAIL herdr: $*" u; u="$(id -un)"; m="${m//"$HOME"/$TILDE}"; echo "${m//"$u"/<user>}" >&2; exit 1; }
 mode() { stat -f %Lp "$1"; }
@@ -200,6 +200,8 @@ case "\$*" in --version) echo "herdr \$(cat "$t/r/have")" ;; "integration instal
 S
 chmod +x "$t/r/bin/herdr"; echo 0.9.6 > "$t/r/have"
 set +e; HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr --remote n0" 2>"$t/r/err"; rc=$?; set -e
+set +e; HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr --session x machine add n0" 2>/dev/null; rc2=$?; set -e
+[[ $rc2 -ne 0 ]] || fail "4g: herdr --session x machine add ran with an unpinned local herdr (audit run-10)"
 [[ $rc -ne 0 ]] && grep -q "pins '0.9.5'" "$t/r/err" || fail "herdr --remote ran with an unpinned local herdr"
 ! grep -q "herdr --remote" "$t/r/calls" || fail "the unpinned herdr reached the remote attach"
 echo 0.9.5 > "$t/r/have"; : > "$t/r/calls"
@@ -213,6 +215,21 @@ HERDR_REMOTE_BINARY=/tmp/x HOME="$t/r" ZSH="$t/r/dot" PATH="$t/r/bin:$PATH" zsh 
 ! grep -q -e "^herdr machine" -e "^herdr --remote" "$t/r/calls" || fail "a refused remote command reached herdr"
 HOME="$t/r" ZSH="$t/r/dot" HERDR_CLAUDE_HOOK="$t/r/hook.sh" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr integration install claude" >/dev/null
 [[ "$(grep -c 'python3 -I - <<' "$t/r/hook.sh")" == 1 ]] || fail "integration install left the hook without python3 -I"
+
+# 4h. install.sh locks ~/.local/bin/herdr (herdr's remote-attach install path) as an immutable
+#     link to the pinned binary, so a remote install cannot replace it; a foreign file there is
+#     reported and left alone (security audit run-10, D-019).
+mkdir -p "$t/lk/pin"; printf '#!/bin/sh\necho herdr 0.9.5\n' > "$t/lk/pin/herdr"; chmod +x "$t/lk/pin/herdr"
+for _ in 1 2; do
+  HOME="$t/lk/h" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK=/nonexistent HERDR_LOCAL_BIN="$t/lk/bin" HERDR_PINNED_BIN="$t/lk/pin/herdr" sh "$here/herdr/install.sh" >/dev/null 2>&1 || true
+done
+[[ -L "$t/lk/bin/herdr" && "$(readlink "$t/lk/bin/herdr")" == "$t/lk/pin/herdr" ]] || fail "4h: ~/.local/bin/herdr is not the link to the pinned binary"
+[[ "$(/usr/bin/stat -f '%Sf' "$t/lk/bin/herdr")" == *uchg* ]] || fail "4h: the link is not immutable"
+echo unpinned > "$t/lk/bin/herdr.tmp.1"
+! mv "$t/lk/bin/herdr.tmp.1" "$t/lk/bin/herdr" 2>/dev/null || fail "4h: a remote install could replace the locked link"
+mkdir -p "$t/lk/bin2"; echo foreign > "$t/lk/bin2/herdr"
+err="$(HOME="$t/lk/h" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK=/nonexistent HERDR_LOCAL_BIN="$t/lk/bin2" HERDR_PINNED_BIN="$t/lk/pin/herdr" sh "$here/herdr/install.sh" 2>&1 >/dev/null || true)"
+[[ "$err" == *"is not the locked link"* && "$(cat "$t/lk/bin2/herdr")" == foreign ]] || fail "4h: a foreign ~/.local/bin/herdr was not reported or was touched"
 
 # 5. The LaunchAgent: n0 only, restarted only after a crash (D-016), logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"

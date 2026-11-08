@@ -19,8 +19,8 @@ herdr() {
   # the host (upstream machine.rs -> prepare_discovered_remote_herdr). HERDR_REMOTE_BINARY skips
   # discovery and installs whatever it names (code review 2026-11-08).
   local remote=0
-  [[ "$1" == machine ]] && remote=1
-  for a in "$@"; do [[ "$a" == --remote || "$a" == --remote=* ]] && remote=1; done
+  # Any argument, not just the first: `herdr --session x machine add n0` is the same command.
+  for a in "$@"; do [[ "$a" == machine || "$a" == --remote || "$a" == --remote=* ]] && remote=1; done
   if (( remote )); then
     if [[ -n "${HERDR_REMOTE_BINARY:-}" ]]; then
       print -u2 "herdr: HERDR_REMOTE_BINARY is set; unset it, it would install that binary on the host unpinned"

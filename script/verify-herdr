@@ -26,8 +26,10 @@ export HERDR_SOCKET_PATH="$HERDR_DIR/herdr.sock"
 unset HERDR_SESSION
 have="$("$BIN" --version | awk '{print $2}')"
 [[ "$have" == "$pin" ]] && ok "herdr $have at the LaunchAgent's path (pin herdr/VERSION $pin)" || nope "herdr '$have' is not the pin $pin"
-[[ ! -e "$HOME/.local/bin/herdr" ]] && ok "no herdr in ~/.local/bin (remote-attach install path)" \
-  || nope "a herdr binary sits in ~/.local/bin and can shadow the pinned one"
+lbh="$HOME/.local/bin/herdr"  # the remote-attach install path, locked to the pin (D-019)
+[[ -L "$lbh" && "$(readlink "$lbh")" == "$BIN" && "$(/usr/bin/stat -f '%Sf' "$lbh" 2>/dev/null)" == *uchg* ]] \
+  && ok "$lbh is the immutable link to the pinned binary (no remote install can replace it)" \
+  || nope "$lbh is not the immutable link to $BIN (run herdr/install.sh)"
 brew list --pinned 2>/dev/null | grep -qx herdr && ok "brew pin herdr" || nope "herdr is not brew-pinned"
 
 line="$("$BIN" integration status 2>/dev/null | grep '^claude:')"
