@@ -42,9 +42,9 @@ server when none runs; for the default session keep the LaunchAgent up.
 - Detach: `ctrl+b q`. Panes and agents keep running in the server.
 - Reattach: `herdr` again, from any terminal.
 - Restart everything (ends every pane): `launchctl kickstart -k gui/$(id -u)/com.broots.herdr-server`.
-  `herdr server stop` also ends every pane, and the LaunchAgent starts a fresh server right
-  after (D-015), so no SSH attach can start one of its own. To keep it stopped:
-  `launchctl bootout gui/$(id -u)/com.broots.herdr-server`.
+  A plain `herdr server stop` is refused by the zsh wrapper (D-016): the LaunchAgent restarts the
+  server only after a crash, so a clean stop would leave the next SSH attach to start one of its
+  own. To keep it stopped: `launchctl bootout gui/$(id -u)/com.broots.herdr-server`.
 - `herdr --remote` refuses to run (through the zsh wrapper) unless this Mac's herdr is the pin in
   herdr/VERSION: with a different protocol generation herdr would offer to install its own,
   unpinned binary on the host.

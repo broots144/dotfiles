@@ -90,6 +90,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - New LaunchAgent com.broots.herdr-hook-patch (every Mac): WatchPaths on the Claude hook runs
     herdr/patch-claude-hook.sh whenever herdr rewrites it from the CLI, the TUI or the API; the
     gate checks it is loaded (test 5a).
+  - D-016 supersedes D-015: KeepAlive is SuccessfulExit=false again (always-on respawned herdr
+    mid-shutdown after its deliberate exit 0), and the zsh wrapper refuses a plain `herdr server
+    stop`, pointing at launchctl kickstart -k or bootout (tests 4f, 5).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
