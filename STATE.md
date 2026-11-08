@@ -66,6 +66,11 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   panes through herdr.sock: every pane is the operator's uid, and Claude Code on n0 runs with
   `bypassPermissions` and no sandbox (checked 2026-11-08), so pane code already holds the
   operator's full authority.
+  Code review (/code-review max, 2026-11-08) fixes, one commit each:
+  - install-launchd.sh reloads an agent only when its rendered plist changed or the job is not
+    loaded; every `dot` on n0 used to boot out the herdr server and end every pane (herdr-
+    server.log: SIGTERM at both run-7 and run-8 deploys). Test: test/install-launchd.sh
+    'unchanged' cases.
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

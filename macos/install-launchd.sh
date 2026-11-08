@@ -4,7 +4,8 @@
 #
 # Renders each macos/*.plist (rewriting __HOME__ to the real $HOME, since
 # launchd does not expand ~), drops it into ~/Library/LaunchAgents, and
-# (re)bootstraps it into the current GUI session. Idempotent, safe to re-run. An agent that
+# (re)bootstraps it into the current GUI session when the rendered file changed or the job is
+# not loaded. Idempotent, safe to re-run. An agent that
 # will not load is reported and the rest still load; the run then exits 1.
 #
 # A plist that carries `<!-- dotfiles-hosts: a b -->` (or `a,b`) is installed only on those hosts
@@ -62,7 +63,15 @@ for src in "$here"/com.broots.*.plist; do
     continue
   fi
 
-  sed "s|__HOME__|$HOME|g" "$src" > "$dst"
+  # Reload only what changed or is not loaded: a bootout stops the job, and for the herdr
+  # server that ends every pane and agent on n0 (code review 2026-11-08). An unchanged,
+  # loaded job is left running.
+  new="$(sed "s|__HOME__|$HOME|g" "$src")"
+  if [[ -f "$dst" && "$(cat "$dst")" == "$new" ]] && launchctl print "gui/$uid/$label" >/dev/null 2>&1; then
+    echo "unchanged $label"
+    continue
+  fi
+  printf '%s\n' "$new" > "$dst"
 
   if ! reload "$label" "$dst"; then
     echo "failed to load $label" >&2; failed=1; continue
