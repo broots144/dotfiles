@@ -304,11 +304,45 @@ set +e; out2="$(HERDR_SOCKET_PATH=/elsewhere/x.sock HERDR_SESSION=work PATH="$t/
 [[ "$out" == *"FAIL server is not a session leader"* ]] || fail "gate did not check detached_server_daemon"
 [[ "$out" == *"FAIL herdr.sock is held by"* ]] || fail "gate accepted a socket the job does not hold"
 
-# 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.
+# 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships. A start
+#    is a non-comment line that runs tmux bare, with only flags, or with new/new-session/attach/
+#    attach-session/at/a (not a detached `new -d`); its guard must be HERDR_ENV on the same line
+#    or in the 3 lines before it (an if block). The scanner is checked on samples first (code
+#    review 2026-11-08: the old regex missed `exec tmux` and `tmux -u new -A`, and any mention
+#    of HERDR_ENV anywhere exempted a whole file).
+tmux_unguarded() {  # prints "file:line" for each unguarded start
+  awk -v F="$1" '
+    { hist[NR] = $0 }
+    /^[[:space:]]*#/ { next }
+    {
+      line = $0; sub(/#.*/, "", line)
+      if (line !~ /(^|[;&|({[:space:]])tmux([[:space:]]|$|[;&|)])/) next
+      rest = line; sub(/.*(^|[;&|({[:space:]])tmux/, "", rest)
+      gsub(/^[[:space:]]+/, "", rest)
+      while (rest ~ /^-[A-Za-z0-9]+/) { sub(/^-[A-Za-z0-9]+[[:space:]]*/, "", rest) }
+      start = 0
+      if (rest == "" || rest ~ /^[;&|)]/) start = 1
+      else if (rest ~ /^(new-session|new|attach-session|attach|at|a)([[:space:]]|$|[;&|)])/ && rest !~ /(^|[[:space:]])-d([[:space:]]|$)/) start = 1
+      if (!start) next
+      guarded = 0
+      for (i = NR - 3; i <= NR; i++) if (i > 0 && hist[i] ~ /HERDR_ENV/) guarded = 1
+      if (!guarded) print F ":" NR
+    }' "$1"
+}
+mkdir -p "$t/tm"
+printf '%s\n' '# HERDR_ENV is mentioned here' '' '' '' '[[ -z $TMUX ]] && exec tmux' > "$t/tm/bad1.zsh"
+printf '%s\n' 'tmux -u new -A -s main' > "$t/tm/bad2.zsh"
+printf '%s\n' 'tmux at' > "$t/tm/bad3.zsh"
+printf '%s\n' 'tmux -2 new' > "$t/tm/bad4.zsh"
+printf '%s\n' '[[ -n $SSH ]] && tmux -CC' > "$t/tm/bad5.zsh"
+printf '%s\n' 'if [[ -z $HERDR_ENV && -z $TMUX ]]; then' '  exec tmux new -A -s main' 'fi' > "$t/tm/good1.zsh"
+printf '%s\n' 'tmux new -d -s bg "sleep 1"' 'alias tl="tmux ls"' '# tmux attach' 'echo "use tmux at"x' > "$t/tm/good2.zsh"
+printf '%s\n' '[[ -z $HERDR_ENV ]] && tmux attach' > "$t/tm/good3.zsh"
+for n in 1 2 3 4 5; do [[ -n "$(tmux_unguarded "$t/tm/bad$n.zsh")" ]] || fail "tmux scanner missed bad$n: $(cat "$t/tm/bad$n.zsh")"; done
+for n in 1 2 3; do [[ -z "$(tmux_unguarded "$t/tm/good$n.zsh")" ]] || fail "tmux scanner flagged good$n: $(tmux_unguarded "$t/tm/good$n.zsh")"; done
 while IFS= read -r f; do
-  if grep -Eq 'tmux +(new-session|new|attach|attach-session|a)( |$)' "$f" && ! grep -q 'HERDR_ENV' "$f"; then
-    fail "$f starts tmux without the HERDR_ENV guard"
-  fi
+  hit="$(tmux_unguarded "$f")"
+  [[ -z "$hit" ]] || fail "tmux started without the HERDR_ENV guard at $hit"
 done < <(cd "$here" && git ls-files '*.zsh' '*.symlink' '*.sh' 'functions/*' | sed "s|^|$here/|")
 
 echo "ok herdr"
