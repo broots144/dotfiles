@@ -269,6 +269,18 @@ printf '#!/bin/sh\nprintf "\\tstate = running\\n\\tpid = %s\\n"\n' "$wpid" > "$t
 chmod +x "$t/vh/bin/herdr" "$t/vh/bin/launchctl"
 set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; set -e
 kill "$wpid" 2>/dev/null || true
+# ...and asks the default server even from a pane of a named session (code review 2026-11-08).
+cat > "$t/vh/bin/herdr" <<S
+#!/bin/sh
+case "\$*" in
+  --version) echo "herdr \$(cat "$here/herdr/VERSION")" ;;
+  "status server") [ "\$HERDR_SOCKET_PATH" = "$t/vh/herdr/herdr.sock" ] && [ -z "\$HERDR_SESSION" ] \
+      && printf 'status: running\nversion: 0.0.1\n' || printf 'status: running\nversion: %s\n' "\$(cat "$here/herdr/VERSION")" ;;
+  *) exit 1 ;;
+esac
+S
+set +e; out2="$(HERDR_SOCKET_PATH=/elsewhere/x.sock HERDR_SESSION=work PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; set -e
+[[ "$out2" == *"running server is '0.0.1', not the pin"* ]] || fail "the gate asked a pane's server instead of the default one"
 [[ "$out" == *"launchd com.broots.herdr-server: running"* ]] || fail "5d: fake launchd not seen as running"
 [[ "$out" == *"FAIL the job has no '$t/vh/bin/herdr server' child"* ]] || fail "gate accepted a job with no server child"
 [[ "$out" == *"FAIL server is not a session leader"* ]] || fail "gate did not check detached_server_daemon"
