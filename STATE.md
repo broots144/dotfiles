@@ -71,6 +71,10 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
     loaded; every `dot` on n0 used to boot out the herdr server and end every pane (herdr-
     server.log: SIGTERM at both run-7 and run-8 deploys). Test: test/install-launchd.sh
     'unchanged' cases.
+  - The herdr server is a session leader (D-017): bin/herdr-server forks it through a
+    /usr/bin/perl setsid shim that stays the launchd job, so `herdr --remote n0` no longer offers
+    to restart (and end every pane of) n0's server. The gate finds the server as the job's child
+    and checks detached_server_daemon. Tests 4a and 5d.
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as

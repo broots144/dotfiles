@@ -37,15 +37,20 @@ label=com.broots.herdr-server
 state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tstate =/{print $2; exit}')"
 [[ "$state" == running ]] && ok "launchd $label: running" || nope "launchd $label: '${state:-not loaded}'"
 # Running is not enough: the wrapper waits while a hand- or SSH-started server holds the socket,
-# so the job's own process must be the server itself (the wrapper execs it) and must hold
-# herdr.sock (security audit run-8).
+# so the job's server must be its own child (bin/herdr-server forks it into its own session,
+# D-017) and must hold herdr.sock (security audit run-8), and herdr must see it as a session
+# leader, or `herdr --remote` offers to restart it.
 jpid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tpid =/{print $2; exit}')"
-jcmd="$(ps -o command= -p "${jpid:-0}" 2>/dev/null)"
-[[ -n "$jpid" && "$jcmd" == "$BIN server" ]] && ok "the job's process is '$BIN server'" \
-  || nope "the job's process is '${jcmd:-none}', not '$BIN server' (another server holds the socket?)"
+spid="$(pgrep -P "${jpid:-0}" 2>/dev/null | head -1)"
+scmd="$(ps -o command= -p "${spid:-0}" 2>/dev/null)"
+[[ -n "$spid" && "$scmd" == "$BIN server" ]] && ok "the job's server process is '$BIN server'" \
+  || nope "the job has no '$BIN server' child (got '${scmd:-none}'; another server holds the socket?)"
 holders=" $(lsof -t "$HERDR_DIR/herdr.sock" 2>/dev/null | tr '\n' ' ')"
-[[ -n "$jpid" && "$holders" == *" $jpid "* ]] && ok "the job's server holds herdr.sock" \
-  || nope "herdr.sock is held by pid(s)${holders:- none}, not the job's ${jpid:-?}"
+[[ -n "$spid" && "$holders" == *" $spid "* ]] && ok "the job's server holds herdr.sock" \
+  || nope "herdr.sock is held by pid(s)${holders:- none}, not the job's server ${spid:-?}"
+"$BIN" status server --json 2>/dev/null | grep -q '"detached_server_daemon": *true' \
+  && ok "server is a session leader (herdr --remote keeps it running)" \
+  || nope "server is not a session leader: herdr --remote would offer to restart it"
 
 status="$(herdr status server)"
 served="$(awk -F': *' '/^ *version:/{print $2; exit}' <<<"$status")"
