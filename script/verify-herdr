@@ -9,6 +9,8 @@ bad=0
 ME="$(id -un)"; UID_ME="$(id -u)"
 HERDR_DIR="${HERDR_DIR:-$HOME/.config/herdr}"
 say()  { local m="$*"; m="${m//$HOME/~}"; echo "${m//$ME/<user>}"; }
+# Nothing but say() reaches the transcript: no command's stderr (paths, names) gets through.
+exec 2>/dev/null
 owner() { [[ "$1" == "$UID_ME" ]] && echo me || echo other; }
 ok()   { say "ok   $*"; }
 nope() { say "FAIL $*"; bad=1; }
@@ -22,7 +24,7 @@ line="$(herdr integration status 2>/dev/null | grep '^claude:')"
 [[ "$line" == "claude: current"* ]] && ok "integration $line" || nope "integration: '$line'"
 hook="$HOME/.claude/hooks/herdr-agent-state.sh"
 n="$(grep -c "herdr-agent-state.sh' session" "$HOME/.claude/settings.json" 2>/dev/null || true)"
-[[ "$n" == 1 ]] && ok "settings.json has 1 herdr SessionStart hook; hook sha256 $(shasum -a 256 "$hook" | cut -c1-16)" \
+[[ "$n" == 1 && -r "$hook" ]] && ok "settings.json has 1 herdr SessionStart hook; hook sha256 $(shasum -a 256 "$hook" | cut -c1-16)" \
   || nope "settings.json has $n herdr hook entries"
 
 label=com.broots.herdr-server

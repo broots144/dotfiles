@@ -6,7 +6,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 t="$(mktemp -d)"; trap 'rm -rf "$t"' EXIT
-fail() { echo "FAIL herdr: $*" >&2; exit 1; }
+fail() { local m="FAIL herdr: $*"; m="${m//$HOME/~}"; echo "${m//$(id -un)/<user>}" >&2; exit 1; }
 mode() { stat -f %Lp "$1"; }
 
 cfg="$here/herdr/config.toml"
@@ -101,7 +101,7 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 #     check fails (its output goes into STATE.md of this public repo; audit run-6 finding).
 mkdir -p "$t/vh/bin" "$t/vh/herdr"; chmod 755 "$t/vh/herdr"; echo x > "$t/vh/herdr/herdr.sock"
 for c in herdr brew launchctl; do printf '#!/bin/sh\necho "error at %s/x for %s" >&2\nexit 1\n' "$HOME" "$(id -un)" > "$t/vh/bin/$c"; chmod +x "$t/vh/bin/$c"; done
-set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>/dev/null)"; rc=$?; set -e
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; rc=$?; set -e
 [[ $rc -ne 0 ]] || fail "verify-herdr passed against a broken setup"
 [[ "$out" == *"FAIL"* ]] || fail "verify-herdr printed no FAIL line"
 [[ "$out" != *"$HOME"* ]] || fail "verify-herdr printed the home path"

@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -36,6 +36,9 @@ Last updated: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr nev
   Lead resolved by fixing it: `herdr/install.sh` now `brew pin`s herdr on every Mac, so the
   MacBook's nightly upgrade cannot put a newer client against n0's pinned server over
   `herdr --remote n0` (the run's needs_validation lead `herdr-remote-attach-installs-unpinned-binary-on-n0`).
+  Security audit run-7 (final-run candidate, 2026-11-08): (low) the gate's stderr still carried
+  paths and the account name (shasum on a missing hook, test failures); now `exec 2>/dev/null` in
+  the gate, masked test failures, and test 5b reads 2>&1.
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
   `config.toml.pre-dotfiles`), `macos/install-launchd.sh` loaded `com.broots.herdr-server`.
