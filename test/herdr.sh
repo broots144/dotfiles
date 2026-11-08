@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # herdr (D-010, D-011): the tracked config is valid and keeps the safe settings, herdr/install.sh
 # links it into an owner-only ~/.config/herdr, bin/herdr-server tightens that directory and
-# waits for a hand-started server, the LaunchAgent always keeps it alive, and no shell file
+# waits for a hand-started server, the LaunchAgent restarts it after a crash, and no shell file
 # auto-attaches tmux inside a herdr pane (herdr docs: agents.mdx, guard with HERDR_ENV).
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -164,6 +164,12 @@ grep -q "^launchctl kickstart gui/.*/com.broots.herdr-server" "$t/z/calls" || fa
 [[ "$(tail -1 "$t/z/calls")" == "herdr " ]] || fail "bare herdr did not attach after the LaunchAgent started"
 : > "$t/z/calls"; HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr pane list"
 ! grep -q launchctl "$t/z/calls" || fail "herdr with arguments touched launchd"
+: > "$t/z/calls"; set +e
+err="$(HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr server stop" 2>&1)"; rc=$?; set -e
+[[ $rc == 1 && "$err" == *"launchctl kickstart -k"* ]] || fail "a plain herdr server stop was not refused (D-016)"
+! grep -q "herdr server stop" "$t/z/calls" || fail "the refused stop reached herdr"
+HOME="$t/z/home" PATH="$t/z/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr server stop --session work"
+grep -q "herdr server stop --session work" "$t/z/calls" || fail "a named session's stop was refused"
 
 # 4g. `herdr --remote` refuses an unpinned local herdr (the host would be offered an unpinned
 #     install), and `herdr integration install` re-applies the hook's python3 -I (audit run-8).
@@ -183,11 +189,11 @@ grep -q "^herdr --remote=n0" "$t/r/calls" || fail "the pinned herdr did not atta
 HOME="$t/r" ZSH="$t/r/dot" HERDR_CLAUDE_HOOK="$t/r/hook.sh" PATH="$t/r/bin:$PATH" zsh -fc "source '$here/herdr/herdr.zsh'; herdr integration install claude" >/dev/null
 [[ "$(grep -c 'python3 -I - <<' "$t/r/hook.sh")" == 1 ]] || fail "integration install left the hook without python3 -I"
 
-# 5. The LaunchAgent: n0 only, always kept alive, logs in ~/Library/Logs.
+# 5. The LaunchAgent: n0 only, restarted only after a crash (D-016), logs in ~/Library/Logs.
 p="$here/macos/com.broots.herdr-server.plist"
 plutil -lint -s "$p"
 grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
-[[ "$(plutil -extract KeepAlive raw "$p")" == true ]] || fail "KeepAlive must be true (D-015, audit run-8)"
+[[ "$(plutil -extract KeepAlive.SuccessfulExit raw "$p")" == false ]] || fail "KeepAlive must be SuccessfulExit=false (D-016: no respawn at shutdown)"
 [[ "$(plutil -extract StandardOutPath raw "$p")" == "__HOME__/Library/Logs/herdr-server.log" ]] || fail "log path"
 [[ "$(plutil -extract ProgramArguments.1 raw "$p")" == "__HOME__/.dotfiles/bin/herdr-server" ]] || fail "program"
 

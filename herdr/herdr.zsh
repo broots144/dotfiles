@@ -10,6 +10,9 @@
 #   (default yes). Same pin on both ends (D-010) means the offer never comes.
 # - `herdr integration install` rewrites the Claude hook without the python3 -I patch; put it
 #   back right after, instead of waiting for the next `dot`.
+# - A plain `herdr server stop` is refused while the LaunchAgent is installed (D-016): the job
+#   restarts only after a crash, so a clean stop left the default server down for the next SSH
+#   attach to start outside the LaunchAgent. Use launchctl to restart it or keep it stopped.
 herdr() {
   local label=com.broots.herdr-server dot="${ZSH:-$HOME/.dotfiles}" a
   for a in "$@"; do
@@ -24,6 +27,10 @@ herdr() {
       break
     fi
   done
+  if [[ "$1" == server && "$2" == stop && -f "$HOME/Library/LaunchAgents/$label.plist" && " $* " != *" --session"* ]]; then
+    print -u2 "herdr: the default server belongs to the LaunchAgent (D-016). Restart it: launchctl kickstart -k gui/$(id -u)/$label; keep it stopped: launchctl bootout gui/$(id -u)/$label"
+    return 1
+  fi
   if (( $# == 0 )) && [[ -f "$HOME/Library/LaunchAgents/$label.plist" ]] \
      && ! command herdr status server 2>/dev/null | grep -q 'status: running'; then
     launchctl kickstart "gui/$(id -u)/$label" 2>/dev/null
