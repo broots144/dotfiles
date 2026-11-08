@@ -101,12 +101,27 @@ grep -q '<!-- dotfiles-hosts: n0 -->' "$p" || fail "plist is not gated to n0"
 #     check fails (its output goes into STATE.md of this public repo; audit run-6 finding).
 mkdir -p "$t/vh/bin" "$t/vh/herdr"; chmod 755 "$t/vh/herdr"; echo x > "$t/vh/herdr/herdr.sock"
 for c in herdr brew launchctl; do printf '#!/bin/sh\necho "error at %s/x for %s" >&2\nexit 1\n' "$HOME" "$(id -un)" > "$t/vh/bin/$c"; chmod +x "$t/vh/bin/$c"; done
-set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; rc=$?; set -e
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; rc=$?; set -e
 [[ $rc -ne 0 ]] || fail "verify-herdr passed against a broken setup"
 [[ "$out" == *"FAIL"* ]] || fail "verify-herdr printed no FAIL line"
 [[ "$out" != *"$HOME"* ]] || fail "verify-herdr printed the home path"
 [[ "$out" != *"$(id -un)"* ]] || fail "verify-herdr printed the account name"
 [[ "$out" == *"owner me"* ]] || fail "verify-herdr did not say whose the files are"
+
+# 5c. The gate fails when the running server is not the pinned version, even with the right
+#     binary on disk (audit run-7).
+cat > "$t/vh/bin/herdr" <<S
+#!/bin/sh
+case "\$*" in
+  --version) echo "herdr \$(cat "$here/herdr/VERSION")" ;;
+  "status server") printf 'status: running\nversion: 0.0.1\n' ;;
+  *) exit 1 ;;
+esac
+S
+chmod +x "$t/vh/bin/herdr"
+set +e; out="$(PATH="$t/vh/bin:$PATH" HERDR_BIN="$t/vh/bin/herdr" HERDR_DIR="$t/vh/herdr" bash "$here/script/verify-herdr" 2>&1)"; set -e
+[[ "$out" == *"running server is '0.0.1', not the pin"* ]] || fail "gate did not catch a server older than the pin"
+[[ "$out" == *"at the LaunchAgent's path"* ]] || fail "gate did not check the LaunchAgent's binary"
 
 # 6. No tmux auto-attach without the HERDR_ENV guard in any shell file this repo ships.
 while IFS= read -r f; do
