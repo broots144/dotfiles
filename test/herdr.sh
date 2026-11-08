@@ -28,18 +28,23 @@ want version_check false
 want manifest_check false
 want delivery '"terminal"'
 
-# 3. install.sh: owner-only dir, link to the tracked file, an old file kept, idempotent. No real
-#    brew or hook: the test must not re-pin or patch the host (code review 2026-11-08).
+# 3. install.sh: owner-only dir, a 0600 copy of the tracked file (not a link), an old file kept,
+#    idempotent. No real brew or hook: the test must not re-pin or patch the host (code review).
 home="$t/home"; mkdir -p "$home/.config/herdr"; chmod 755 "$home/.config/herdr"
 echo "old = 1" > "$home/.config/herdr/config.toml"
 out="$(HOME="$home" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh")"
 [[ "$(mode "$home/.config/herdr")" == 700 ]] || fail "install.sh left ~/.config/herdr at $(mode "$home/.config/herdr")"
-[[ -L "$home/.config/herdr/config.toml" ]] || fail "install.sh did not link config.toml"
-[[ "$(readlink "$home/.config/herdr/config.toml")" == "$here/herdr/config.toml" ]] || fail "config.toml links elsewhere"
+[[ -f "$home/.config/herdr/config.toml" && ! -L "$home/.config/herdr/config.toml" ]] || fail "install.sh did not copy config.toml"
+cmp -s "$home/.config/herdr/config.toml" "$here/herdr/config.toml" || fail "config.toml is not the tracked content"
+[[ "$(mode "$home/.config/herdr/config.toml")" == 600 ]] || fail "config.toml is not 0600"
 grep -q "old = 1" "$home/.config/herdr/config.toml.pre-dotfiles" || fail "the old config was not kept"
-[[ "$out" == *linked* ]] || fail "install.sh said: $out"
+[[ "$out" == *copied* ]] || fail "install.sh said: $out"
 out="$(HOME="$home" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh")"
-[[ "$out" == *"already linked"* ]] || fail "second install.sh run was not a no-op: $out"
+[[ "$out" == *"already current"* ]] || fail "second install.sh run was not a no-op: $out"
+# an old link into the checkout is replaced by a copy (herdr would write through it)
+rm "$home/.config/herdr/config.toml"; ln -s "$here/herdr/config.toml" "$home/.config/herdr/config.toml"
+HOME="$home" ZSH="$here" HERDR_BREW=/nonexistent HERDR_CLAUDE_HOOK=/nonexistent sh "$here/herdr/install.sh" >/dev/null
+[[ ! -L "$home/.config/herdr/config.toml" ]] || fail "the old link into the checkout was kept"
 
 # 4. bin/herdr-server: 0700 dirs, waits while another server runs, then execs `herdr server`.
 cat > "$t/herdr" <<S

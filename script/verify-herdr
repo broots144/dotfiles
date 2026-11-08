@@ -76,8 +76,9 @@ for s in herdr.sock herdr-client.sock; do
   [[ "$kind $mode $uid" == "socket 600 $UID_ME" ]] && ok "$s: socket 600, owner me" \
     || nope "$s: $kind, mode ${mode:-?}, owner $(owner "${uid:-}")"
 done
-[[ "$(readlink "$dir/config.toml")" == "$HOME/.dotfiles/herdr/config.toml" ]] && ok "config.toml linked to dotfiles" \
-  || nope "config.toml is not the dotfiles link"
+[[ -f "$dir/config.toml" && ! -L "$dir/config.toml" ]] && cmp -s "$dir/config.toml" herdr/config.toml \
+  && ok "config.toml matches herdr/config.toml (a copy, not a link)" \
+  || nope "config.toml differs from herdr/config.toml or is a link (run herdr/install.sh)"
 "$BIN" config check >/dev/null 2>&1 && ok "herdr config check" || nope "herdr config check"
 ph="${XDG_STATE_HOME:-$HOME/.local/state}/herdr/agent-detection/remote"
 read -r pmode puid <<<"$(stat -f '%Lp %u' "$ph" 2>/dev/null)"

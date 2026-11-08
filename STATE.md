@@ -106,6 +106,9 @@ Last updated: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audi
   - agent-detection/remote is a read-only placeholder file (D-012 addendum), put there by
     install.sh, bin/herdr-server and the wrapper and checked by the gate, so even `herdr server
     update-agent-manifests` cannot cache unpinned rules (tests 4b, 4d2).
+  - herdr/install.sh copies config.toml (0600) instead of linking it into the checkout, where
+    herdr's settings writes dirtied n0's ~/dev/dotfiles and stopped dev-pull; an old link is
+    replaced, a differing file kept as .pre-dotfiles, and the gate compares contents (test 3).
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
