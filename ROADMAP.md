@@ -11,5 +11,5 @@ Status detail lives in STATE.md. Each phase's gate is `just verify-phase-N`.
 | P4 | Two-machine ~/dev sync, GitHub as hub | ✅ | `verify-phase-4`: test/dev-pull.sh |
 | P5 | Nightly Homebrew upgrade on the laptop | ✅ | `verify-phase-5`: bash syntax, shellcheck, plist lint |
 | P6 | Repo-state pattern and PR state guard | 🟡 | `verify-phase-6`: guard self-test; merge of the retrofit PR |
-| P8 | herdr agent multiplexer on n0 | 🟡 | `verify-phase-8`: test/herdr.sh + script/verify-herdr (live, n0) |
+| P8 | herdr agent multiplexer on n0 | ✅ | `verify-phase-8`: test/herdr.sh + script/verify-herdr (live, n0) |
 | P7 | README rewritten for this setup; legacy scripts linted or removed | ⏸ | not started |

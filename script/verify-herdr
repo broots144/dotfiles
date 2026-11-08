@@ -4,8 +4,10 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 bad=0
-ok()   { echo "ok   $*"; }
-nope() { echo "FAIL $*"; bad=1; }
+# Paths print as ~/...: this output is pasted into STATE.md of a public repo.
+say()  { local m="$*"; echo "${m//$HOME/~}"; }
+ok()   { say "ok   $*"; }
+nope() { say "FAIL $*"; bad=1; }
 
 pin="$(cat herdr/VERSION)"
 have="$(herdr --version 2>/dev/null | awk '{print $2}')"
