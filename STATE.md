@@ -116,6 +116,9 @@ Last updated: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-revi
     test masks quote the ~ replacement, which bash otherwise tilde-expands back to the home path
     (test 5b); patch-claude-hook.sh is in the justfile lint and syntax lists; D-018 records the
     pin-on-every-Mac rule.
+  - The gate and test masks take ~ from a variable: under /bin/bash 3.2 the quoted "~" from #30
+    printed its quotes. Test 5b now runs the gate with HOME set and wants a bare ~. Gate output
+    after the code-review fixes is below.
   Residual, documented: `herdr --remote n0` and named sessions still autostart (upstream).
   The gate `just verify-phase-8` (alias `verify-herdr`) is merged (PR #24) and deployed on n0
   2026-11-07: `herdr/install.sh` linked the config (the old one kept as
@@ -285,6 +288,35 @@ ok untrusted-input
 $ just verify-phase-6
 ok check-state
 verify-phase-6 ok
+```
+
+## Verify output (P8 after the code-review fixes, 2026-11-08, n0)
+
+`just verify-phase-8` after PR #30 and the ~ mask fix, deployed with `macos/install-launchd.sh` (herdr-server reloaded once for D-016/D-017, the other agents left running) and `herdr/install.sh`:
+
+```
+ok   herdr 0.9.5 at the LaunchAgent's path (pin herdr/VERSION 0.9.5)
+ok   no herdr in ~/.local/bin (remote-attach install path)
+ok   brew pin herdr
+ok   integration claude: current (v11) (~/.claude/hooks/herdr-agent-state.sh)
+ok   settings.json has 1 herdr SessionStart hook; hook sha256 cd032ee99adb68ad
+ok   Claude hook runs python3 -I (no cwd on sys.path)
+ok   com.broots.herdr-hook-patch loaded (re-patches the hook on any rewrite)
+ok   launchd com.broots.herdr-server: running
+ok   the job's server process is '/opt/homebrew/bin/herdr server'
+ok   the job's server holds herdr.sock
+ok   server is a session leader (herdr --remote keeps it running)
+ok   server running
+ok   running server is the pin (0.9.5)
+ok   API socket answers (workspace.list)
+ok   ~/.config/herdr mode 700, owner me
+ok   herdr.sock: socket 600, owner me
+ok   herdr-client.sock: socket 600, owner me
+ok   config.toml matches herdr/config.toml (a copy, not a link)
+ok   herdr config check
+ok   agent-detection/remote is a read-only placeholder file (no remote rules can be cached)
+ok   agent-detection rules: all bundled with the pinned binary, never checked remotely (D-012)
+verify-phase-8 ok
 ```
 
 ## Verify output (P8, 2026-11-07, n0)
