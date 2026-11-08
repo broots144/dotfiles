@@ -32,6 +32,9 @@ n="$(grep -c "herdr-agent-state.sh' session" "$HOME/.claude/settings.json" 2>/de
 
 grep -q '^HERDR_ACTION=.* python3 -I - <<' "$hook" && ok "Claude hook runs python3 -I (no cwd on sys.path)" \
   || nope "Claude hook runs python3 without -I (run herdr/install.sh)"
+launchctl print "gui/$(id -u)/com.broots.herdr-hook-patch" >/dev/null 2>&1 \
+  && ok "com.broots.herdr-hook-patch loaded (re-patches the hook on any rewrite)" \
+  || nope "com.broots.herdr-hook-patch is not loaded (run macos/install-launchd.sh)"
 
 label=com.broots.herdr-server
 state="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/^\tstate =/{print $2; exit}')"
