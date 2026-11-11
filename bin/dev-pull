@@ -168,6 +168,12 @@ wip_snapshot() {  # <repo> <branch>; sets wip_msg
     [[ -f "$dst/$f" && ! -L "$dst/$f" ]] || continue
     (( $(stat -f %z "$dst/$f") > 1048576 )) && ex+=(":(exclude)$f")
   done < <("${g[@]}" ls-files -z --others --exclude-standard 2>/dev/null)
+  # Submodules (gitlinks, mode 160000) stay as HEAD has them: `add -A` asks each one whether it
+  # changed, which runs git inside it with its own config (core.fsmonitor, a clean filter); a
+  # non-absorbed submodule's config is not scanned (review 2026-11-07 r3, N4, Medium).
+  while IFS= read -r -d '' f; do
+    ex+=(":(exclude,literal)${f#*$'\t'}")
+  done < <("${g[@]}" ls-files -z -s 2>/dev/null | grep -z '^160000 ' || true)
   "${g[@]}" add -A -- . "${ex[@]}" 2>"$work/err" || { unset GIT_INDEX_FILE; wip_msg="snapshot failed (add): $r ($(grep -m1 . "$work/err"))"; return 1; }
   tree=$("${g[@]}" write-tree); unset GIT_INDEX_FILE
   if [[ "$tree" == "$("${g[@]}" rev-parse 'HEAD^{tree}')" ]]; then wip_msg="dirty only by excluded files, no snapshot: $r"; wip_clear "$r"; return 0; fi
