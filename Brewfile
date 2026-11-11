@@ -101,6 +101,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "orcaslicer"
 cask "creality-print"
 cask "sparrow"
 cask "discord"
