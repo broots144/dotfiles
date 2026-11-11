@@ -201,5 +201,32 @@ git -C "$t/dpn/dev/fmap" rev-parse -q --verify refs/wip/book >/dev/null || { ech
 git -C "$t/dpn/dev/narrow" rev-parse -q --verify refs/remotes/origin/other >/dev/null && { echo "FAIL: dev-pull widened a single-branch clone's fetch"; fail=1; }
 [[ "$(git -C "$t/dpn/dev/fmap" log -1 --format=%s)" == two ]] || { echo "FAIL: dev-pull did not fast-forward fmap ($out)"; fail=1; }
 
+# dev-pull WIP snapshot and a non-absorbed submodule (review 2026-11-07 r3, N4, Medium): `add -A`
+# asked the submodule whether it changed, which ran git inside it with its own config
+# (core.fsmonitor ran). The snapshot leaves gitlinks as HEAD has them and still carries the
+# superproject's own edits.
+dpw() { HOME="$t/dpw" ZSH="$here" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$t" \
+  DEV_PULL_GH="$t/gh-private" DEV_PULL_GITLEAKS="$t/leaks-ok" DEV_PULL_OWN_RE='/dpwup/' DEV_PULL_ALLOW_FILE=1 \
+  "$here/bin/dev-pull" 2>&1 || true; }
+mkdir -p "$t/dpw/dev" "$t/dpwup"
+G init -q -b main "$t/dpwup/sub"; echo a > "$t/dpwup/sub/f"; echo '* filter=x' > "$t/dpwup/sub/.gitattributes"
+G -C "$t/dpwup/sub" add .; G -C "$t/dpwup/sub" commit -qm i
+G init -q -b main "$t/dpwup/sup"; echo a > "$t/dpwup/sup/f"; G -C "$t/dpwup/sup" add f
+Gf -C "$t/dpwup/sup" submodule -q add "$t/dpwup/sub" sub 2>/dev/null; G -C "$t/dpwup/sup" commit -qm i
+G clone -q --bare "$t/dpwup/sup" "$t/dpwup/sup.git"
+git clone -q "$t/dpwup/sup.git" "$t/dpw/dev/sup"; G -C "$t/dpw/dev/sup" submodule -q init
+rmdir "$t/dpw/dev/sup/sub"; git clone -q "$t/dpwup/sub" "$t/dpw/dev/sup/sub"
+git -C "$t/dpw/dev/sup/sub" config core.fsmonitor "touch $t/pwned-dpw-fsm; false #"
+git -C "$t/dpw/dev/sup/sub" config filter.x.clean "touch $t/pwned-dpw-filt; cat"
+echo b >> "$t/dpw/dev/sup/sub/f"; echo b >> "$t/dpw/dev/sup/f"
+sub0=$(git -C "$t/dpw/dev/sup" rev-parse HEAD:sub)
+out=$(dpw)
+no "$t/pwned-dpw-fsm" "dev-pull WIP snapshot ran core.fsmonitor from a non-absorbed submodule's config"
+no "$t/pwned-dpw-filt" "dev-pull WIP snapshot ran a filter from a non-absorbed submodule's config"
+grep -q "snapshot pushed to refs/wip/.*: sup" <<<"$out" || { echo "FAIL: dev-pull did not snapshot a repo with a submodule ($out)"; fail=1; }
+w=$(git -C "$t/dpwup/sup.git" for-each-ref --format='%(objectname)' 'refs/wip/*' | head -1)
+[[ -n "$w" && "$(git -C "$t/dpwup/sup.git" show "$w:f")" == "$(printf 'a\nb')" ]] || { echo "FAIL: dev-pull snapshot lost the superproject edit"; fail=1; }
+[[ -n "$w" && "$(git -C "$t/dpwup/sup.git" rev-parse "$w:sub")" == "$sub0" ]] || { echo "FAIL: dev-pull snapshot changed the gitlink"; fail=1; }
+
 (( fail == 0 )) && echo "ok untrusted-input"
 exit "$fail"

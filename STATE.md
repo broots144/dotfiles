@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -215,7 +215,11 @@ Last updated: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout fir
   submodule's own config (filter, credential helper) is never read by a command that runs it.
   `local_config_unsafe` also scans absorbed submodule configs (`.git/modules/**/config`,
   git's own `core.worktree` there allowed) and skips the repo with `<key> in submodule <name>`.
-  Submodules are not updated by dev-pull; run `git submodule update` by hand.
+  Submodules are not updated by dev-pull; run `git submodule update` by hand. The WIP snapshot
+  stages with every gitlink (mode 160000) excluded by pathspec, so `add -A` never asks a
+  submodule whether it changed; that ran git inside a non-absorbed submodule with its own
+  config (core.fsmonitor, a clean filter). The snapshot keeps the gitlink HEAD has (security
+  review r3 N4, Medium, fixed 2026-11-10; test/untrusted-input.sh `dpw`).
   gitleaks runs with `lib/gitleaks.toml`, an empty ignore dir and `--ignore-gitleaks-allow`, so
   the scanned tree cannot switch rules off. Pinned by test/untrusted-input.sh and
   test/dev-pull-edges.sh (real gitleaks case; CI installs gitleaks). `DEV_PULL_ALLOW_FILE=1`
@@ -381,9 +385,17 @@ every open Low documented with a reason; A+ also needs no open finding above Inf
   WIP snapshot, and a planted `remote.origin.fetch` could move or prune local branches (PR #18);
   N6 (Low) `drop_identical` missed files renamed into place (PR #18); N2 (Info) one vanished
   file discarded the encrypted archive (PR #19); N3 (Info) dev-sync-from-n0 misreported why a
-  fast-forward failed (PR #19); N4 (Low) install-launchd.sh stopped on the bootout/bootstrap
-  race (PR #20); N5 (Info) legacy installers set a missing login shell and piped an unpinned
+  fast-forward failed (PR #19); install-launchd.sh stopped on the bootout/bootstrap race
+  (Low, PR #20; listed as N4 here before, a code-review numbering, not the security review's N4); N5 (Info) legacy installers set a missing login shell and piped an unpinned
   installer into sh (PR #20). Each has a regression test.
+- r3 N4 (Medium), fixed 2026-11-10 (sweep of the 2026-11-06..09 reviews; it had been mislabelled
+  here as the accepted Informational on non-absorbed submodules): the dev-pull WIP snapshot's
+  `git add -A` ran a non-absorbed submodule's own config (filter, core.fsmonitor) while checking
+  whether the submodule changed. Gitlinks are now excluded from the snapshot by pathspec;
+  test/untrusted-input.sh (`dpw`) fails without the fix (the submodule's clean filter ran) and
+  passes with it.
+- r3 L2 (Low), fixed 2026-11-10: holman's bin/mustacheme, bin/movieme, bin/gitio and
+  bin/cloudapp (plain http uploads, predictable /tmp paths) deleted; nothing referenced them.
 - r3 deploy follow-ups (found by the live check, fixed forward): the mirror rsync exited 23 on
   an evicted package directory in iCloud (`fstatat: Resource deadlock avoided`); PR #21 and
   PR #22 remove the nearest evicted ancestor and retry.
@@ -434,8 +446,9 @@ Open Lows, each accepted or blocked:
   before changing a repo to public (see "What is true now"). Since N2, no new snapshot is pushed
   after the change.
 - Accepted (Informational): submodules are not scanned when they are not absorbed (`sub/.git` a directory);
-  dev-pull never runs a git command inside one (no recursion, `--ignore-submodules=all`), which
-  test/untrusted-input.sh pins.
+  dev-pull never runs a git command inside one (no recursion, `--ignore-submodules=all` on status,
+  gitlinks excluded from the WIP snapshot's `add -A` since r3 N4), which test/untrusted-input.sh
+  pins (`dps`, `dpw`).
 - Accepted (Informational): `homebrew/install.sh` pipes Homebrew's own installer
   (`raw.githubusercontent.com/Homebrew/install/HEAD`) into bash, unpinned. It is Homebrew's
   documented install path and runs only when brew is missing (a fresh Mac, interactively);
@@ -448,7 +461,7 @@ Open Lows, each accepted or blocked:
 
 - Operator: purge iCloud Drive "Recently Deleted" (plaintext copies from before the 2026-11-06
   and 2026-11-07 fixes) and rotate the TV pairing tokens (see Security grade).
-- Legacy holman scripts (`bin/dot`, `bin/git-up`, `bin/mustacheme`, `script/bootstrap`) have
+- Legacy holman scripts (`bin/dot`, `bin/git-up`, `script/bootstrap`) have
   shellcheck warnings; `just check` lints only the maintained scripts. Clean up or delete unused ones.
 - README.md is still holman's upstream text; it does not describe the launchd jobs or the two hosts.
 
