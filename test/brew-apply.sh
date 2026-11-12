@@ -86,6 +86,17 @@ ok grep -qx 'brew:jq' "$t/state/snapshot"; no grep -qx 'brew:wget' "$t/state/sna
 no grep -q 'uninstall' "$LOG"
 run; no grep -qx 'brew:jq' "$t/state/snapshot"
 
+# App Store entries removed from the Brewfile: kept while mas lists the app (9 digit ids come
+# with a leading space), forgotten once it is uninstalled, all kept when mas cannot say.
+printf '%s\n' mas:111111111 mas:2222222222 >> "$t/state/snapshot"
+printf '#!/bin/sh\n[ -n "${MAS_FAILS:-}" ] && exit 1\nprintf "%%s\\n" " 111111111  Old App  (1.0)" "497799835  Xcode  (16.0)"\n' > "$t/bin/mas"; chmod +x "$t/bin/mas"
+: > "$LOG"; out=$(MAS_FAILS=1 "$here/bin/brew-apply" 2>&1) || true
+ok grep -qx 'mas:111111111' "$t/state/snapshot"; ok grep -qx 'mas:2222222222' "$t/state/snapshot"
+run
+ok grep -qx 'mas:111111111' "$t/state/snapshot"; no grep -qx 'mas:2222222222' "$t/state/snapshot"
+ok grep -q 'not listed again): mas:111111111 $' <<<"$out"
+rm "$t/bin/mas"
+
 # A check that fails without naming anything still counts as something missing.
 echo unnamed > "$MISSING"
 run --dry-run; ok grep -q 'would install: something (brew bundle check failed' <<<"$out"

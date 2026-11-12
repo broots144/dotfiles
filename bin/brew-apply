@@ -91,8 +91,14 @@ snapshot() {
     sort -u "$state/snapshot" | comm -23 - "$tmp/now" > "$tmp/gone"
     if [[ -s "$tmp/gone" ]]; then
       if { brew list --formula -1 | sed 's/^/brew:/'; brew list --cask -1 | sed 's/^/cask:/'; } > "$tmp/inst" 2>/dev/null; then
+        # App Store apps too, when mas can list them (the id is right-aligned: leading spaces).
+        # Without a working mas, removed App Store entries are all kept.
+        if command -v mas >/dev/null 2>&1 && mas list > "$tmp/mas" 2>/dev/null; then
+          sed -n 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]].*/mas:\1/p' "$tmp/mas" >> "$tmp/inst"
+        else
+          grep '^mas:' "$tmp/gone" > "$tmp/keep"
+        fi
         sort -u "$tmp/inst" > "$tmp/installed"
-        grep '^mas:' "$tmp/gone" > "$tmp/keep"
         comm -12 "$tmp/gone" "$tmp/installed" >> "$tmp/keep"
       else
         cp "$tmp/gone" "$tmp/keep"
