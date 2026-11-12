@@ -15,7 +15,9 @@ cat > "$t/bin/brew" <<'B'
 #!/bin/sh
 echo "brew $*" >> "$LOG"
 case "$1 $2" in
-  "bundle check") while read -r m; do [ -n "$m" ] && echo "→ $m needs to be installed or updated."; done < "$MISSING"; exit 0 ;;
+  "bundle check") [ -s "$MISSING" ] || exit 0   # like brew: the list on stderr, exit 1
+     [ "$(cat "$MISSING")" = unnamed ] && exit 1
+     while read -r m; do echo "→ $m needs to be installed or updated." >&2; done < "$MISSING"; exit 1 ;;
   "bundle install") [ -t 0 ] && echo "stdin is a tty" >> "$LOG"
      if [ -n "${INSTALL_FAILS:-}" ]; then echo "$INSTALL_FAILS" > "$MISSING"; exit 1; fi; : > "$MISSING" ;;
   "list --formula") printf '%s\n' git ${FORMULAE:-} ;;
@@ -83,6 +85,11 @@ ok [ "$rc" = 0 ]; ok grep -q 'removed from the Brewfile (left alone, not listed 
 ok grep -qx 'brew:jq' "$t/state/snapshot"; no grep -qx 'brew:wget' "$t/state/snapshot"
 no grep -q 'uninstall' "$LOG"
 run; no grep -qx 'brew:jq' "$t/state/snapshot"
+
+# A check that fails without naming anything still counts as something missing.
+echo unnamed > "$MISSING"
+run --dry-run; ok grep -q 'would install: something (brew bundle check failed' <<<"$out"
+: > "$MISSING"
 
 # Off master: nothing is installed.
 git -C "$ZSH" checkout -q -b topic; echo 'Formula x' > "$MISSING"
