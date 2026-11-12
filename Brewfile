@@ -14,7 +14,6 @@ brew "rtk"
 brew "pdftk-java"
 brew "imessage-exporter"
 brew "htop"
-brew "geoip"
 brew "herdr"
 brew "caddy" if n0
 brew "cargo-llvm-cov"
@@ -117,7 +116,6 @@ cask "plex"
 cask "multipass"
 cask "iterm2"
 cask "firefox"
-cask "cakebrew"
 cask "orcaslicer" if n0
 cask "creality-print" if n0
 cask "sparrow"
