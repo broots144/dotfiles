@@ -2,6 +2,7 @@
 
 One line per lesson, newest first.
 
+- 2026-11-11: brew-apply's first run on book said 'in sync' with 94 entries missing: `brew bundle check --verbose` writes its list to stderr when stdout is not a terminal, the script read stdout only, and the test stub printed to stdout and always exited 0. Rule: a stub must copy the real tool's streams and exit codes, and a check's exit code counts even when its output cannot be parsed; verify a rollout on the Mac that has work to do.
 - 2026-11-11: The Brewfile was kept true to n0 for five months, but nothing installed from it except a manual `dot`, so book lacked 102 of its entries and nobody noticed. Rule: a sync has two halves, record and apply; check the receiving Mac, not only the repo (D-022).
 - 2026-11-08: book was offline during the herdr rollout, so `herdr --remote n0` there refused with 'missing': `dot` does not pull the repo, so a Mac that missed a change needs `git -C ~/.dotfiles pull --ff-only` before `dot`. Check every Mac after a rollout, not only n0.
 - 2026-11-08: A herdr test session started in Phase 0, before `herdr/config.toml` was linked, ran with herdr's defaults and kept fetching agent-detection rules from herdr.dev into the cache every session shares, so the pinned default server ran remote rules despite `manifest_check = false` (found by security audit run-5). Rule: stop throwaway sessions as soon as the test is done, and treat any herdr state shared across sessions as written by the least-configured one (D-012).
