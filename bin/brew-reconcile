@@ -136,12 +136,13 @@ for pkg in $(brew list --cask 2>/dev/null); do
   add_cask+=("cask:$pkg"); actions+=("add ${pkg:t} (cask)")
 done
 
-# Mac App Store apps. `mas list` prints: "<id>  <Name>  (<version>)". We key by
+# Mac App Store apps. `mas list` prints: "<id>  <Name>  (<version>)", the id right-aligned, so
+# a 9 digit id has a leading space (those apps were never recorded before 2026-11-11). We key by
 # id and carry the name through for the Brewfile line. Skipped if mas is absent.
 if command -v mas >/dev/null 2>&1; then
   local masline mid mname
   for masline in "${(@f)$(mas list 2>/dev/null)}"; do
-    [[ "$masline" =~ '^([0-9]+)[[:space:]]+(.+[^[:space:]])[[:space:]]+\([^)]*\)[[:space:]]*$' ]] || continue
+    [[ "$masline" =~ '^[[:space:]]*([0-9]+)[[:space:]]+(.+[^[:space:]])[[:space:]]+\([^)]*\)[[:space:]]*$' ]] || continue
     mid="${match[1]}"; mname="${match[2]}"
     [[ -n "${have_mas[$mid]:-}" ]] && continue
     if [[ -n "${was_mas[$mid]:-}" ]]; then held+=("$mname (mas)"); continue; fi
