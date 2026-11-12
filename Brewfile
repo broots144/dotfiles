@@ -161,8 +161,6 @@ cask "transmission" if n0
 cask "vlc"
 
 # Mac App Store
-mas "Spark", id: 1176895641
-mas "Bluebook", id: 1645016851
 mas "HDHomeRun", id: 949582631 if n0
 mas "Xcode", id: 497799835 if n0
 mas "GarageBand", id: 682658836 if n0
