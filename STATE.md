@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-11 (P9 Brewfile mirror both ways on branch brew-mirror: bin/brew-apply, script/brewfile-push, brew-reconcile on both Macs, n0-only entries, D-022; not deployed yet). Before: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -12,9 +12,30 @@ Last updated: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snaps
 - [x] P5 Nightly Homebrew upgrade on the laptop
 - [x] P6 Repo-state pattern (PR #8)
 - [x] P8 herdr on n0 (plan docs/plans/P8-herdr.md, D-010, D-011, PR #24)
+- [ ] P9 Brewfile mirrors both Macs, both ways (plan docs/plans/P9-brew-mirror.md, D-022): built and tested, rollout open
 
 ## What is true now
 
+- Brewfile mirror, both ways (P9, D-022, on branch `brew-mirror`, NOT deployed until the PR
+  merges and `macos/install-launchd.sh` runs on each Mac):
+  - `bin/brew-apply` (LaunchAgent `com.broots.brew-apply`, hourly, n0 and book) fast-forwards
+    the checkout and runs `brew bundle install --no-upgrade` with stdin closed when the Mac
+    lacks something. Installs only, master only; what fails (password cask, App Store sign-in)
+    is listed in `~/Library/Logs/brew-apply.log`, exit 1, and waits a day (`--force` retries).
+  - `brew-reconcile` runs on both Macs (marker `n0 book`), fast-forwards first, does nothing on
+    a branch, and pushes through `script/brewfile-push`, as does the `brew` wrapper. The push
+    goes out when every unpushed commit is a `brew:` commit touching only the Brewfile, and is
+    rebased onto origin when the other Mac pushed first (`Brewfile merge=union`).
+  - Removals: `brew uninstall` in an interactive shell drops the line. The other Mac keeps the
+    package but does not list it again (snapshot in `~/.local/state/brew-apply/snapshot`).
+    Nothing is ever uninstalled by a job.
+  - n0-only entries end in `if n0` (18 on 2026-11-11: ollama, ollama-app, lm-studio,
+    anythingllm, orcaslicer, creality-print, qfinder-pro, caddy, handbrake-app, transmission,
+    flutter, android-commandlinetools, cocoapods, xcodegen, and the App Store apps HDHomeRun,
+    Xcode, GarageBand, iMovie). A new install on n0 is mirrored to book unless the suffix is
+    added by hand.
+  - book lacked 102 Brewfile entries on 2026-11-11 (`brew bundle check` over ssh); about 85 of
+    them are not n0-only and will be installed by its first run.
 - herdr (P8, D-010, D-011, docs/herdr.md): Homebrew herdr 0.9.5 installed on n0 and pinned
   (`herdr/VERSION`). Claude integration v11 installed and read first: one hook file and one
   `SessionStart` entry in `~/.claude/settings.json`. Verified live 2026-11-07 with two Claude
@@ -243,7 +264,7 @@ Last updated: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snaps
   the new one skip. dev-push-to-n0 exits 4 when an rsync comparison fails (rsync 23/24, a file
   vanished, are reported and not fatal). A local refs cache entry is seeded once from a matching
   iCloud `.refs`, which is then removed.
-- Tests: `script/test` runs 16 regression tests (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
+- Tests: `script/test` runs 16 regression tests, plus `brew-apply` and `brewfile-push` since P9 (`brew-nightly`, `brew-reconcile`, `brew-sync-push`,
   `brew-wrapper`, `check-state`, `dev-icloud-backup`, `dev-icloud-backup-edges`, `dev-pull`,
   `dev-pull-edges`, `dev-push-to-n0`, `dev-sync-from-n0`, `dev-sync-lock`, `install-launchd`,
   `legacy-installers`, `untrusted-input`, `workflow-pinning`); all pass on n0 2026-11-07 under
@@ -467,6 +488,9 @@ Open Lows, each accepted or blocked:
 
 ## Next
 
+- P9 rollout: merge the PR; on n0 run `macos/install-launchd.sh`; on book
+  `git -C ~/.dotfiles pull --ff-only` then `macos/install-launchd.sh`; read
+  `~/Library/Logs/brew-apply.log` on both after the first run, then tick P9.
 - Watch the next nightly backup (`LAST_RUN.json` exit 0, no "removed ... evicted" storm) and the
   first dev-pull WIP snapshot of a private repo (visibility cache in
   `~/.local/state/dev-pull/visibility`).

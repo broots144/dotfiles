@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# brewfile-push <dotfiles dir>: publish unattended Brewfile commits, and nothing else.
+#
+# Used by the `brew` wrapper (functions/brew) and bin/brew-reconcile on both Macs (D-022).
+# It pushes only when every unpushed commit is a Brewfile commit: subject `brew: ...`, one
+# parent, touching the Brewfile and no other file. Any other local commit keeps everything
+# unpushed for a human to review (PR #1, #2; test/brew-sync-push.sh).
+#
+# Both Macs push to master, so a push can be rejected because the other one got there first.
+# Then the Brewfile commits are rebased onto origin and pushed once more. `.gitattributes`
+# gives the Brewfile the built-in union merge, so two Macs adding a line under the same
+# header never conflict. A rebase that cannot run (tracked edits in the checkout) is left for
+# the next brew-reconcile run, which calls this again.
+#
+# Exit: 0 pushed or nothing to push, 3 not ours to push (said why), 1 push failed.
+set -uo pipefail
+dir="${1:?usage: brewfile-push <dotfiles dir>}"
+g() { git -C "$dir" -c core.hooksPath=/dev/null "$@"; }
+say() { echo "brewfile-push: $*" >&2; }
+
+# 0 when every unpushed commit is a Brewfile commit; prints the count either way.
+only_brewfile_commits() {
+  local c n=0 bad=0
+  for c in $(g rev-list '@{u}..HEAD'); do
+    n=$((n + 1))
+    case "$(g log -1 --format=%s "$c")" in "brew: "*) ;; *) bad=1 ;; esac
+    [ "$(g rev-list --parents -n 1 "$c" | wc -w | tr -d ' ')" = 2 ] || bad=1
+    [ "$(g diff-tree --no-commit-id --name-only -r "$c")" = Brewfile ] || bad=1
+  done
+  echo "$n"
+  return "$bad"
+}
+
+if ! g rev-parse -q --verify '@{u}' >/dev/null 2>&1; then
+  say "not pushing (no upstream branch)"
+  exit 3
+fi
+n=$(only_brewfile_commits) || {
+  say "not pushing ($n commit(s) ahead of upstream), not all of them Brewfile commits; push by hand after review"
+  exit 3
+}
+[ "$n" = 0 ] && exit 0
+
+g push -q 2>/dev/null && exit 0
+
+# Rejected or offline. If origin moved, put our Brewfile commits on top of it and try once more.
+if ! g fetch -q 2>/dev/null; then
+  say "push failed (offline?); the next brew-reconcile run retries"
+  exit 1
+fi
+if [ "$(g rev-list --count 'HEAD..@{u}')" != 0 ]; then
+  if ! g rebase -q '@{u}' >/dev/null 2>&1; then
+    g rebase --abort >/dev/null 2>&1
+    say "origin moved and the rebase did not run (edits in the checkout?); the next brew-reconcile run retries"
+    exit 1
+  fi
+  n=$(only_brewfile_commits) || { say "not pushing after the rebase ($n commit(s) ahead)"; exit 3; }
+fi
+if g push -q 2>/dev/null; then
+  exit 0
+fi
+say "push failed; the next brew-reconcile run retries"
+exit 1

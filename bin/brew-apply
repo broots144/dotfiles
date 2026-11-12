@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+#
+# brew-apply: install what the Brewfile lists and this Mac lacks (D-022). The other half of the
+# two-way mirror: the `brew` wrapper and brew-reconcile record an install in the Brewfile and
+# push it; this job, on the other Mac, pulls the dotfiles and installs it.
+#
+#   brew-apply             pull, install what is missing
+#   brew-apply --dry-run   list what is missing, change nothing
+#   brew-apply --force     ignore the one-day wait after a failed attempt
+#
+# Run hourly by macos/com.broots.brew-apply.plist on n0 and book. Rules:
+# - Installs only. It never upgrades (brew-nightly and sublevel's brew_nightly_mac do that) and
+#   never uninstalls.
+# - Only from a master checkout: a branch's Brewfile is unreviewed work.
+# - Unattended: stdin is closed, so a cask that wants a password fails instead of waiting. What
+#   could not be installed is listed, the run exits 1, and the same Brewfile is not tried again
+#   for a day (--force, or any Brewfile change, tries at once).
+# - Host-only entries are plain Ruby in the Brewfile (`cask "x" if n0`); brew bundle skips them.
+#
+# It also keeps a snapshot of every entry this Mac has seen in the Brewfile
+# (~/.local/state/brew-apply/snapshot: brew:<name>, cask:<name>, mas:<id>). An entry in the
+# snapshot that is gone from the Brewfile was removed on purpose (`brew uninstall` on either
+# Mac). brew-reconcile reads the snapshot and does not add such an entry back just because it
+# is still installed here; it stays installed and unlisted until it is uninstalled here too.
+# An entry is forgotten once it is neither listed nor installed. (A formula listed under an
+# alias is forgotten early; brew-reconcile would then list it again under its real name.)
+#
+# Exit: 0 in sync, installed everything, or waiting; 1 something could not be installed.
+# BREW_APPLY_PATH and BREW_APPLY_STATE exist for test/brew-apply.sh.
+
+set -uo pipefail
+export PATH="${BREW_APPLY_PATH:-/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin}"
+export HOMEBREW_NO_ENV_HINTS=1
+dots="${ZSH:-$HOME/.dotfiles}"
+brewfile="$dots/Brewfile"
+state="${BREW_APPLY_STATE:-$HOME/.local/state/brew-apply}"
+retry_after=86400
+say() { echo "$(date -u +%FT%TZ) brew-apply: $*"; }
+
+dry=0 force=0
+for a in "$@"; do
+  case "$a" in
+    --dry-run) dry=1 ;;
+    --force) force=1 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "brew-apply: unknown option: $a" >&2; exit 2 ;;
+  esac
+done
+
+command -v brew >/dev/null 2>&1 || { say "brew not found in PATH" >&2; exit 1; }
+[[ -f "$brewfile" ]] || { say "no Brewfile at $brewfile" >&2; exit 1; }
+
+branch="$(git -C "$dots" symbolic-ref --short -q HEAD 2>/dev/null)" || branch=""
+if [[ "$branch" != master ]]; then
+  say "the dotfiles checkout is on '${branch:-a detached HEAD}', not master: nothing installed"
+  exit 0
+fi
+(( dry )) || "$(cd "$(dirname "$0")/.." && pwd -P)/script/self-update" "$dots" 2>&1 | sed 's/^dot: /dotfiles: /'
+
+missing() {
+  HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --verbose --no-upgrade --file="$brewfile" 2>/dev/null \
+    | sed -n 's/^→ \(.*\) needs to be installed.*/\1/p' | tr '\n' ';' | sed 's/;$//; s/;/, /g'
+}
+
+# Every entry of the Brewfile as brew:<basename>, cask:<basename> or mas:<id>.
+entries() {
+  local line name
+  while IFS= read -r line; do
+    case "$line" in
+      'brew "'*) name="${line#brew \"}"; name="${name%%\"*}"; echo "brew:${name##*/}" ;;
+      'cask "'*) name="${line#cask \"}"; name="${name%%\"*}"; echo "cask:${name##*/}" ;;
+      'mas '*) name="$(printf '%s\n' "$line" | sed -n 's/.*id:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+               [[ -n "$name" ]] && echo "mas:$name" ;;
+    esac
+  done < "$brewfile" | sort -u
+}
+
+# Snapshot: what is listed now, plus what was listed before, is not any more, and is still
+# installed here. If brew cannot say what is installed, nothing is forgotten.
+snapshot() {
+  local tmp; tmp="$(mktemp -d)" || return 0
+  mkdir -p "$state"
+  entries > "$tmp/now"
+  : > "$tmp/keep"
+  if [[ -s "$state/snapshot" ]]; then
+    sort -u "$state/snapshot" | comm -23 - "$tmp/now" > "$tmp/gone"
+    if [[ -s "$tmp/gone" ]]; then
+      if { brew list --formula -1 | sed 's/^/brew:/'; brew list --cask -1 | sed 's/^/cask:/'; } > "$tmp/inst" 2>/dev/null; then
+        sort -u "$tmp/inst" > "$tmp/installed"
+        grep '^mas:' "$tmp/gone" > "$tmp/keep"
+        comm -12 "$tmp/gone" "$tmp/installed" >> "$tmp/keep"
+      else
+        cp "$tmp/gone" "$tmp/keep"
+      fi
+    fi
+  fi
+  sort -u "$tmp/now" "$tmp/keep" > "$tmp/snapshot" && mv "$tmp/snapshot" "$state/snapshot"
+  if [[ -s "$tmp/keep" ]]; then
+    say "installed here but removed from the Brewfile (left alone, not listed again): $(sort -u "$tmp/keep" | tr '\n' ' ')"
+  fi
+  rm -rf "$tmp"
+}
+
+lack="$(missing)"
+if (( dry )); then
+  if [[ -n "$lack" ]]; then say "would install: $lack"; else say "in sync"; fi
+  exit 0
+fi
+snapshot
+if [[ -z "$lack" ]]; then
+  rm -f "$state/attempt"
+  say "in sync"
+  exit 0
+fi
+
+# One failed attempt per Brewfile per day: a cask that needs a password fails every time.
+sum="$(shasum -a 256 < "$brewfile" | cut -d' ' -f1)"
+now="$(date +%s)"
+if (( ! force )) && [[ -s "$state/attempt" ]]; then
+  read -r old_sum old_time < "$state/attempt" || true
+  case "${old_time:-}" in ''|*[!0-9]*) old_time=0 ;; esac
+  if [[ "${old_sum:-}" == "$sum" ]] && (( now - old_time < retry_after )); then
+    say "still missing after the last attempt, trying again in $(( (retry_after - (now - old_time) + 3599) / 3600 )) h (or brew-apply --force): $lack"
+    exit 0
+  fi
+fi
+
+say "installing: $lack"
+brew bundle install --no-upgrade --file="$brewfile" </dev/null
+rc=$?
+lack="$(missing)"
+snapshot
+if [[ -z "$lack" ]]; then
+  rm -f "$state/attempt"
+  say "exit 0"
+  exit 0
+fi
+echo "$sum $now" > "$state/attempt"
+say "not installed (brew bundle exit $rc; password, App Store sign-in or a broken package): $lack" >&2
+say "exit 1"
+exit 1

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent (both Macs): hourly, pull the dotfiles and install what the Brewfile lists and
+  this Mac lacks. See bin/brew-apply (D-022). Installs only; upgrades stay with brew-nightly
+  (book) and sublevel's brew_nightly_mac (n0).
+
+  Installed/loaded by macos/install-launchd.sh. The HOME placeholders below are
+  rewritten to an absolute path at install time (launchd does not expand ~).
+-->
+<!-- dotfiles-hosts: n0 book -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.broots.brew-apply</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.dotfiles/bin/brew-apply</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ZSH</key>
+        <string>__HOME__/.dotfiles</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/brew-apply.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/brew-apply.log</string>
+</dict>
+</plist>

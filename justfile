@@ -1,5 +1,5 @@
 # Maintained shell scripts (bash/sh). Legacy holman scripts are syntax-checked only.
-maintained := "bin/brew-nightly script/self-update bin/herdr-server herdr/install.sh herdr/patch-claude-hook.sh script/verify-herdr bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
+maintained := "bin/brew-nightly bin/brew-apply script/brewfile-push script/self-update bin/herdr-server herdr/install.sh herdr/patch-claude-hook.sh script/verify-herdr bin/dev-icloud-backup bin/dev-pull bin/dev-push-to-n0 bin/dev-sync-from-n0 lib/dev-tree.sh macos/install-launchd.sh script/test script/check-state script/coverage test/*.sh test/lib/fake-n0.sh"
 
 default: check
 
@@ -74,6 +74,17 @@ verify-phase-6:
 verify-phase-8:
     test/herdr.sh
     script/verify-herdr
+
+# P9 Brewfile mirror both ways (D-022)
+verify-phase-9:
+    test/brew-apply.sh
+    test/brewfile-push.sh
+    test/brew-reconcile.sh
+    test/brew-sync-push.sh
+    test/brew-wrapper.sh
+    plutil -lint -s macos/com.broots.brew-apply.plist macos/com.broots.brew-reconcile.plist
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --all --file=Brewfile >/dev/null
+    @echo "verify-phase-9 ok"
 
 # alias of verify-phase-8 (the task brief called it "phase 1")
 verify-herdr: verify-phase-8

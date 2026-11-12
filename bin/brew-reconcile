@@ -18,6 +18,9 @@
 # schedule (LaunchAgent) and the Brewfile is self-healing regardless of who
 # installed what.
 #
+# It runs on both Macs (D-022): each records what was installed on it, and bin/brew-apply on
+# the other installs it. It works on a master checkout only and fast-forwards it first.
+#
 # It is ADD-ONLY by design. It never removes lines: the Brewfile legitimately
 # lists non-leaf formulae (e.g. openssl, ruby-build) that aren't "installed on
 # request", and a temporarily-uninstalled tool shouldn't be silently dropped.
@@ -38,6 +41,8 @@ emulate -L zsh
 setopt local_options no_nomatch pipefail
 
 ZSH="${ZSH:-$HOME/.dotfiles}"
+# The helper scripts come from beside this file, not from the checkout being reconciled.
+scripts="${0:A:h:h}/script"
 brewfile="$ZSH/Brewfile"
 
 dry_run=0 do_push=1
@@ -45,10 +50,26 @@ for a in "$@"; do
   case "$a" in
     --dry-run) dry_run=1 ;;
     --no-push) do_push=0 ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
     *) echo "brew-reconcile: unknown option: $a" >&2; exit 2 ;;
   esac
 done
+
+# Unattended commits belong on master only: on a branch the Brewfile is work in progress.
+if (( ! dry_run )); then
+  local branch
+  branch="$(git -C "$ZSH" symbolic-ref --short -q HEAD 2>/dev/null)" || branch=""
+  if [[ "$branch" != master ]]; then
+    echo "brew-reconcile: the dotfiles checkout is on '${branch:-a detached HEAD}', not master: nothing done"
+    exit 0
+  fi
+  # Both Macs write the Brewfile (D-022): start from origin's copy, and publish a Brewfile
+  # commit an earlier run or the `brew` wrapper could not push.
+  "$scripts/self-update" "$ZSH" 2>&1 | sed 's/^dot: /brew-reconcile: /'
+  if (( do_push )) && [[ -n "$(git -C "$ZSH" rev-list -n 1 '@{u}..HEAD' 2>/dev/null)" ]]; then
+    "$scripts/brewfile-push" "$ZSH"
+  fi
+fi
 
 command -v brew >/dev/null 2>&1 || { echo "brew-reconcile: brew not found in PATH" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "brew-reconcile: jq not found in PATH" >&2; exit 1; }
@@ -67,6 +88,21 @@ while IFS= read -r line; do
   esac
 done < "$brewfile"
 
+# Entries this Mac has seen in the Brewfile (bin/brew-apply keeps the snapshot). One that is
+# installed here, in the snapshot and no longer in the Brewfile was removed on purpose, here or
+# on the other Mac: it is not added back. An interactive `brew install` lists it again.
+typeset -A was_brew was_cask was_mas
+local snap="${BREW_APPLY_STATE:-$HOME/.local/state/brew-apply}/snapshot"
+if [[ -r "$snap" ]]; then
+  while IFS= read -r line; do
+    case "$line" in
+      brew:*) was_brew[${line#brew:}]=1 ;;
+      cask:*) was_cask[${line#cask:}]=1 ;;
+      mas:*)  was_mas[${line#mas:}]=1 ;;
+    esac
+  done < "$snap"
+fi
+
 # True if formula $1 (or any of its aliases/oldnames) is already in the Brewfile.
 brew_covered() {
   [[ -n "${have_brew[${1:t}]:-}" ]] && return 0
@@ -74,20 +110,26 @@ brew_covered() {
   for alt in $(brew info --json=v2 --formula "$1" 2>/dev/null \
                  | jq -r '.formulae[0] | ([.full_name] + .aliases + .oldnames) | .[]' 2>/dev/null); do
     [[ -n "${have_brew[${alt:t}]:-}" ]] && return 0
+    [[ -n "${was_brew[${alt:t}]:-}" ]] && was_hit=1
   done
   return 1
 }
 
 # ---- collect drift ----------------------------------------------------------
-local -a add_brew add_cask add_mas actions
-local pkg
+local -a add_brew add_cask add_mas actions held
+local pkg was_hit
 
 for pkg in $(brew leaves --installed-on-request 2>/dev/null); do
-  brew_covered "$pkg" || { add_brew+=("$pkg"); actions+=("add ${pkg:t}"); }
+  was_hit=0
+  brew_covered "$pkg" && continue
+  if (( was_hit )) || [[ -n "${was_brew[${pkg:t}]:-}" ]]; then held+=("${pkg:t}"); continue; fi
+  add_brew+=("$pkg"); actions+=("add ${pkg:t}")
 done
 
 for pkg in $(brew list --cask 2>/dev/null); do
-  [[ -n "${have_cask[${pkg:t}]:-}" ]] || { add_cask+=("cask:$pkg"); actions+=("add ${pkg:t} (cask)"); }
+  [[ -n "${have_cask[${pkg:t}]:-}" ]] && continue
+  if [[ -n "${was_cask[${pkg:t}]:-}" ]]; then held+=("${pkg:t} (cask)"); continue; fi
+  add_cask+=("cask:$pkg"); actions+=("add ${pkg:t} (cask)")
 done
 
 # Mac App Store apps. `mas list` prints: "<id>  <Name>  (<version>)". We key by
@@ -97,9 +139,13 @@ if command -v mas >/dev/null 2>&1; then
   for masline in "${(@f)$(mas list 2>/dev/null)}"; do
     [[ "$masline" =~ '^([0-9]+)[[:space:]]+(.+[^[:space:]])[[:space:]]+\([^)]*\)[[:space:]]*$' ]] || continue
     mid="${match[1]}"; mname="${match[2]}"
-    [[ -n "${have_mas[$mid]:-}" ]] || { add_mas+=("$mid:$mname"); actions+=("add $mname (mas)"); }
+    [[ -n "${have_mas[$mid]:-}" ]] && continue
+    if [[ -n "${was_mas[$mid]:-}" ]]; then held+=("$mname (mas)"); continue; fi
+    add_mas+=("$mid:$mname"); actions+=("add $mname (mas)")
   done
 fi
+
+(( ${#held} )) && echo "brew-reconcile: installed here but removed from the Brewfile, not added back: ${(j:, :)held}"
 
 if (( ${#actions} == 0 )); then
   echo "brew-reconcile: Brewfile already in sync"
@@ -179,21 +225,15 @@ else
   exit 1
 fi
 
-# Push only when this commit is the one thing unpushed, so an unattended run never
-# publishes work in progress that happened to be committed locally.
+# script/brewfile-push publishes only when every unpushed commit is a Brewfile commit, so an
+# unattended run never publishes work in progress that happened to be committed locally.
 if (( do_push )); then
-  local ahead
-  ahead="$(git -C "$ZSH" rev-list --count '@{u}..HEAD' 2>/dev/null)" || ahead=""
-  if [[ "$ahead" != 1 ]]; then
-    echo "brew-reconcile: not pushing (${ahead:-no upstream} commit(s) ahead of upstream); push by hand after review" >&2
-    exit 0
-  fi
-  if git -C "$ZSH" push -q; then
-    echo "brew-reconcile: pushed"
-  else
-    echo "brew-reconcile: push failed (retry later: git -C \"$ZSH\" push)" >&2
-    exit 1
-  fi
+  "$scripts/brewfile-push" "$ZSH"
+  case $? in
+    0) [[ -z "$(git -C "$ZSH" rev-list -n 1 '@{u}..HEAD' 2>/dev/null)" ]] && echo "brew-reconcile: pushed" ;;
+    3) ;;
+    *) exit 1 ;;
+  esac
 fi
 
 exit 0

@@ -1,3 +1,8 @@
+# One Brewfile for both Macs (D-022). An entry ending in `if n0` installs only on n0, the Mac
+# Mini home hub: local LLMs, 3D printing, home hardware, app building, media. Everything else
+# is mirrored to book too. Add or drop the suffix by hand; `brew install` never adds it.
+n0 = `/usr/sbin/scutil --get HostName 2>/dev/null`.strip == "n0"
+
 # Taps
 tap "knative-extensions/kn-plugins"
 tap "knative/client"
@@ -5,7 +10,7 @@ tap "broots144/tap"
 
 # CLI tools
 brew "herdr"
-brew "caddy"
+brew "caddy" if n0
 brew "cargo-llvm-cov"
 brew "lightpanda-io/browser/lightpanda"
 brew "mosh"
@@ -36,14 +41,14 @@ brew "sops"
 brew "age"
 brew "hcloud"
 brew "opentofu"
-brew "xcodegen"
+brew "xcodegen" if n0
 brew "terminal-notifier"
 brew "poppler"
 brew "fswatch"
 brew "wget"
 brew "python@3.12"
 brew "pipx"
-brew "ollama"
+brew "ollama" if n0
 brew "ocrmypdf"
 brew "grok"
 brew "hf"
@@ -56,7 +61,7 @@ brew "docker-compose"
 brew "docker-buildx"
 brew "docker"
 brew "colima"
-brew "cocoapods"
+brew "cocoapods" if n0
 brew "keith/formulae/reminders-cli"
 brew "openssl"
 brew "git"
@@ -101,8 +106,8 @@ brew "k9s"
 brew "ansible"
 
 # Casks
-cask "orcaslicer"
-cask "creality-print"
+cask "orcaslicer" if n0
+cask "creality-print" if n0
 cask "sparrow"
 cask "discord"
 cask "deskreen"
@@ -111,7 +116,7 @@ cask "kde-connect"
 cask "android-platform-tools"
 cask "tor-browser"
 cask "rsyncui"
-cask "qfinder-pro"
+cask "qfinder-pro" if n0
 cask "rectangle"
 cask "hammerspoon"
 cask "ubersicht"
@@ -124,32 +129,32 @@ cask "raspberry-pi-imager"
 cask "maccy"
 cask "broots144/tap/claudeglance"
 cask "google-drive"
-cask "ollama-app"
-cask "lm-studio"
-cask "anythingllm"
+cask "ollama-app" if n0
+cask "lm-studio" if n0
+cask "anythingllm" if n0
 cask "grok-build"
 cask "codex"
 cask "chatgpt"
-cask "flutter"
-cask "android-commandlinetools"
+cask "flutter" if n0
+cask "android-commandlinetools" if n0
 cask "alfred"
 cask "caffeine"
 cask "ghostty"
 cask "visual-studio-code"
 cask "google-chrome"
-cask "handbrake-app"
+cask "handbrake-app" if n0
 cask "slack"
 cask "sourcetree"
 cask "sublime-text"
 cask "the-unarchiver"
-cask "transmission"
+cask "transmission" if n0
 cask "vlc"
 
 # Mac App Store
-mas "HDHomeRun", id: 949582631
-mas "Xcode", id: 497799835
-mas "GarageBand", id: 682658836
-mas "iMovie", id: 408981434
+mas "HDHomeRun", id: 949582631 if n0
+mas "Xcode", id: 497799835 if n0
+mas "GarageBand", id: 682658836 if n0
+mas "iMovie", id: 408981434 if n0
 mas "Keynote", id: 361285480
 mas "Numbers", id: 361304891
 mas "Pages", id: 361309726

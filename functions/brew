@@ -38,17 +38,10 @@ brew() {
       return 1
     fi
     echo "Brewfile synced (${(j:, :)actions})"
-    # Push only when this commit is the one thing unpushed, so a brew install never
-    # publishes other work that happened to be committed locally.
-    local ahead
-    ahead="$(git -C "$ZSH" rev-list --count '@{u}..HEAD' 2>/dev/null)" || ahead=""
-    if [[ "$ahead" != 1 ]]; then
-      echo "Brewfile committed, not pushed (${ahead:-no upstream} commit(s) ahead); push by hand after review" >&2
-      return 0
-    fi
-    if ! git -C "$ZSH" push -q; then
-      echo "Brewfile committed but push failed (push later with: git -C \$ZSH push)" >&2
-    fi
+    # script/brewfile-push publishes only when every unpushed commit is a Brewfile commit, so
+    # a brew install never publishes other work that happened to be committed locally; it
+    # rebases onto origin when the other Mac pushed first (D-022).
+    "$scripts/brewfile-push" "$ZSH"
   }
 
   command brew "$@"
@@ -66,6 +59,11 @@ brew() {
 
   local brewfile="$ZSH/Brewfile"
   [[ -f "$brewfile" ]] || return $ret
+  # Both Macs write the Brewfile (D-022): edit origin's copy, not a stale one. On master only;
+  # self-update leaves a checkout with edits or local commits alone.
+  local scripts="${functions_source[brew]:A:h:h}/script"
+  [[ -x "$scripts/self-update" ]] || scripts="$ZSH/script"
+  "$scripts/self-update" "$ZSH" 2>/dev/null
   local brew_wip=0
   git -C "$ZSH" diff --quiet HEAD -- Brewfile 2>/dev/null || brew_wip=1
 
