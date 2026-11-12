@@ -2,6 +2,7 @@
 
 One line per lesson, newest first.
 
+- 2026-11-11: brew-reconcile matched `mas list` lines with `^[0-9]+`, but mas right-aligns the id, so every app with a 9 digit id was skipped since June; the test only had a 9 digit id without the padding. Rule: take test input from the real tool's output, byte for byte. And a known bug found on the way is fixed in the same session, not parked as a question.
 - 2026-11-11: brew-apply's first run on book said 'in sync' with 94 entries missing: `brew bundle check --verbose` writes its list to stderr when stdout is not a terminal, the script read stdout only, and the test stub printed to stdout and always exited 0. Rule: a stub must copy the real tool's streams and exit codes, and a check's exit code counts even when its output cannot be parsed; verify a rollout on the Mac that has work to do.
 - 2026-11-11: The Brewfile was kept true to n0 for five months, but nothing installed from it except a manual `dot`, so book lacked 102 of its entries and nobody noticed. Rule: a sync has two halves, record and apply; check the receiving Mac, not only the repo (D-022).
 - 2026-11-08: book was offline during the herdr rollout, so `herdr --remote n0` there refused with 'missing': `dot` does not pull the repo, so a Mac that missed a change needs `git -C ~/.dotfiles pull --ff-only` before `dot`. Check every Mac after a rollout, not only n0.

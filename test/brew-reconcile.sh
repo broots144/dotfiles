@@ -126,6 +126,10 @@ LEAVES=dead-formula CASKS=dead-cask rec
 ok [ "$rc" = 0 ]; ok grep -q 'gone from Homebrew, not listed: dead-formula, dead-cask (cask)' <<<"$out"
 ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$head" ]; ok git -C "$ZSH" diff --quiet
 
+# mas right-aligns the id: a 9 digit id comes with a leading space and is recorded all the same.
+MAS=' 640199958  Developer  (11.1.1)' rec
+ok [ "$rc" = 0 ]; ok grep -qx 'mas "Developer", id: 640199958' "$ZSH/Brewfile"
+
 # A Brewfile commit an earlier run could not push goes out at the start of the next run.
 printf 'brew "offline"\n' >> "$ZSH/Brewfile"; git -C "$ZSH" commit -qam 'brew: add offline'
 rec; ok [ "$rc" = 0 ]; ok [ "$(up)" = 'brew: add offline' ]

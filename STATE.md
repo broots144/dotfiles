@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-11 (P9 follow-up: book in sync; tap trust and App Store ids noted; n0 still lacks Spark and Bluebook). Before: 2026-11-11 (P9 Brewfile mirror both ways done: PRs #38, #39, #40, deployed on n0 and book). Before: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-11 (brew-reconcile records App Store apps with 9 digit ids). Before: 2026-11-11 (P9 follow-up: book in sync; tap trust and App Store ids noted; n0 still lacks Spark and Bluebook). Before: 2026-11-11 (P9 Brewfile mirror both ways done: PRs #38, #39, #40, deployed on n0 and book). Before: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -51,8 +51,10 @@ Last updated: 2026-11-11 (P9 follow-up: book in sync; tap trust and App Store id
     needs one `brew trust <tap>` (or a direct install) on the receiving Mac.
     book had Keynote, Numbers and Pages under their old App Store ids (409183694, 409203825,
     409201541); the Brewfile lists the current ones, installed on book by hand.
-    brew-reconcile reads `mas list` lines that start with the id only, so apps with a 9 digit
-    id (printed with a leading space) are never recorded; left as is for now, see Next.
+    brew-reconcile read `mas list` lines that start with the id only, so apps with a 9 digit
+    id (printed with a leading space) were never recorded. Fixed the same day; book then
+    records Developer, Prime Video and TestFlight, which mirror to n0. The old iWork ids still
+    installed on book were put in book's brew-apply snapshot by hand so they are not listed.
   - `brew bundle check --verbose` writes its list to stderr when stdout is not a terminal;
     brew-apply reads both streams and trusts the exit code (PR #39, LESSONS 2026-11-11).
 - herdr (P8, D-010, D-011, docs/herdr.md): Homebrew herdr 0.9.5 installed on n0 and pinned
@@ -508,9 +510,8 @@ Open Lows, each accepted or blocked:
 ## Next
 
 - P9 leftovers: n0 lacks the App Store apps Spark and Bluebook that book recorded (install them
-  in the App Store app on n0, or drop the two lines). Decide whether brew-reconcile should
-  record App Store apps with 9 digit ids: fixing the pattern would list book's Developer,
-  Prime Video, TestFlight and the old iWork ids and mirror them to n0.
+  in the App Store app on n0, or drop the two lines), and Developer, Prime Video and TestFlight
+  once book has recorded them. The old iWork apps (13.2) on book can be deleted.
 - Watch the next nightly backup (`LAST_RUN.json` exit 0, no "removed ... evicted" storm) and the
   first dev-pull WIP snapshot of a private repo (visibility cache in
   `~/.local/state/dev-pull/visibility`).
