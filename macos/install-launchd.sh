@@ -11,8 +11,9 @@
 # A plist that carries `<!-- dotfiles-hosts: a b -->` (or `a,b`) is installed only on those hosts
 # (and unloaded/removed elsewhere). The host is HostName, else LocalHostName: Bonjour renames
 # LocalHostName on a name conflict (n0 became n0-2 on 2026-10-28), HostName stays put.
-# A plist without the marker is installed everywhere. The iCloud backup and the Brewfile
-# reconciler belong to n0; the dev sync and the nightly brew upgrade to the laptop.
+# A plist without the marker is installed everywhere. The iCloud backup belongs to n0; the dev
+# sync and the nightly brew upgrade to the laptop; the Brewfile reconciler and brew-apply run on
+# both (D-022).
 
 set -euo pipefail
 

@@ -30,6 +30,7 @@ cat > "$t/bin/mas" <<'M'
 M
 chmod +x "$t/bin/brew" "$t/bin/mas"
 export PATH="$t/bin:/usr/bin:/bin" ZSH="$t/dots"
+export BREW_APPLY_STATE="$t/state" DOT_UPDATE_ALLOW_FILE=1
 git init -q --bare -b master "$t/up.git"; git clone -q "$t/up.git" "$ZSH" 2>/dev/null
 cat > "$ZSH/Brewfile" <<'BF'
 # Taps
@@ -97,6 +98,37 @@ printf 'brew "hand-edit"\n' >> "$ZSH/Brewfile"; head=$(git -C "$ZSH" rev-parse H
 LEAVES=tree rec
 ok [ "$rc" = 0 ]; ok grep -q 'added lines left uncommitted for review' <<<"$out"
 ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$head" ]; ok grep -qx 'brew "tree"' "$ZSH/Brewfile"
+
+git -C "$ZSH" checkout -q Brewfile
+
+# Two Macs (D-022). The other Mac pushed a line: this run starts from it (fast-forward first).
+git clone -q "$t/up.git" "$t/other" 2>/dev/null
+printf 'cask "from-book"\n' >> "$t/other/Brewfile"
+git -C "$t/other" commit -qam 'brew: add from-book'; git -C "$t/other" push -q 2>/dev/null
+rec; ok [ "$rc" = 0 ]; ok grep -q 'cask "from-book"' "$ZSH/Brewfile"
+ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$(git -C "$t/up.git" rev-parse master)" ]
+
+# Installed here, seen in the Brewfile before (brew-apply's snapshot), gone from it now: removed
+# on purpose on one of the Macs, so not added back. By alias too. A new install still is.
+mkdir "$t/state"; printf '%s\n' brew:nmap cask:gone-cask mas:555 brew:k8s-alias > "$t/state/snapshot"
+head=$(git -C "$ZSH" rev-parse HEAD)
+LEAVES=nmap CASKS=gone-cask MAS='555  Gone App  (2.0)' rec
+ok [ "$rc" = 0 ]; ok grep -q 'not added back: nmap, gone-cask (cask), Gone App (mas)' <<<"$out"
+ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$head" ]; ok git -C "$ZSH" diff --quiet
+LEAVES='nmap fresh' rec
+ok grep -qx 'brew "fresh"' "$ZSH/Brewfile"; ok bash -c '! grep -q nmap "$1"' _ "$ZSH/Brewfile"
+ok [ "$(up)" = 'brew: reconcile add fresh' ]
+
+# A Brewfile commit an earlier run could not push goes out at the start of the next run.
+printf 'brew "offline"\n' >> "$ZSH/Brewfile"; git -C "$ZSH" commit -qam 'brew: add offline'
+rec; ok [ "$rc" = 0 ]; ok [ "$(up)" = 'brew: add offline' ]
+
+# On a branch the Brewfile is work in progress: nothing is committed (--dry-run still reports).
+git -C "$ZSH" checkout -q -b topic; head=$(git -C "$ZSH" rev-parse HEAD)
+LEAVES=branchy rec
+ok [ "$rc" = 0 ]; ok grep -q "is on 'topic', not master: nothing done" <<<"$out"
+ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$head" ]; ok git -C "$ZSH" diff --quiet
+LEAVES=branchy rec --dry-run; ok grep -qxF '  + add branchy' <<<"$out"
 
 (( fail == 0 )) && echo "ok brew-reconcile"
 exit "$fail"
