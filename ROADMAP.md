@@ -13,4 +13,4 @@ Status detail lives in STATE.md. Each phase's gate is `just verify-phase-N`.
 | P6 | Repo-state pattern and PR state guard | 🟡 | `verify-phase-6`: guard self-test; merge of the retrofit PR |
 | P8 | herdr agent multiplexer on n0 | ✅ | `verify-phase-8`: test/herdr.sh + script/verify-herdr (live, n0) |
 | P7 | README rewritten for this setup; legacy scripts linted or removed | ⏸ | not started |
-| P9 | Brewfile mirrors both Macs, both ways | 🟡 | `verify-phase-9`: brew tests; rollout on n0 and book after the PR merges |
+| P9 | Brewfile mirrors both Macs, both ways | ✅ | `verify-phase-9`: brew tests, plist lint, Brewfile parses |
