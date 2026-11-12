@@ -116,19 +116,23 @@ brew_covered() {
 }
 
 # ---- collect drift ----------------------------------------------------------
-local -a add_brew add_cask add_mas actions held
+local -a add_brew add_cask add_mas actions held dead
 local pkg was_hit
+# An old install Homebrew no longer carries cannot be installed on the other Mac, where its
+# Brewfile line would fail brew-apply on every run (geoip and cakebrew from book, 2026-11-11).
 
 for pkg in $(brew leaves --installed-on-request 2>/dev/null); do
   was_hit=0
   brew_covered "$pkg" && continue
   if (( was_hit )) || [[ -n "${was_brew[${pkg:t}]:-}" ]]; then held+=("${pkg:t}"); continue; fi
+  brew info --json=v2 --formula "$pkg" >/dev/null 2>&1 || { dead+=("${pkg:t}"); continue; }
   add_brew+=("$pkg"); actions+=("add ${pkg:t}")
 done
 
 for pkg in $(brew list --cask 2>/dev/null); do
   [[ -n "${have_cask[${pkg:t}]:-}" ]] && continue
   if [[ -n "${was_cask[${pkg:t}]:-}" ]]; then held+=("${pkg:t} (cask)"); continue; fi
+  brew info --cask --json=v2 "$pkg" >/dev/null 2>&1 || { dead+=("${pkg:t} (cask)"); continue; }
   add_cask+=("cask:$pkg"); actions+=("add ${pkg:t} (cask)")
 done
 
@@ -145,6 +149,7 @@ if command -v mas >/dev/null 2>&1; then
   done
 fi
 
+(( ${#dead} )) && echo "brew-reconcile: installed here but gone from Homebrew, not listed: ${(j:, :)dead}"
 (( ${#held} )) && echo "brew-reconcile: installed here but removed from the Brewfile, not added back: ${(j:, :)held}"
 
 if (( ${#actions} == 0 )); then

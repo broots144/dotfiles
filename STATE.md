@@ -1,6 +1,6 @@
 # Current Build State
 
-Last updated: 2026-11-11 (P9 Brewfile mirror both ways deployed on n0 and book, PR #38; brew-apply fixed to read the missing list from stderr after book's first run said in sync; book pushed 12 of its own installs). Before: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
+Last updated: 2026-11-11 (P9 Brewfile mirror both ways done: PRs #38, #39, deployed on n0 and book, first runs checked on both; brew-reconcile skips installs gone from Homebrew). Before: 2026-11-10 by Claude (security sweep leftovers: dev-pull WIP snapshot leaves submodule gitlinks out of `add -A`, review r3 N4 (Medium), test/untrusted-input.sh; legacy holman scripts mustacheme, movieme, gitio, cloudapp deleted, L2). Before: 2026-11-08 by Claude (`dot` now fast-forwards its own checkout first, D-021, script/self-update, test/dot-self-update.sh). Before: 2026-11-08 by Claude (book: herdr 0.9.5 installed, pinned and locked; `herdr --remote n0` guard passes; book's checkout had been offline and behind). Before: 2026-11-08 by Claude (security grade for the herdr scope: A after audit run-11; `just verify-security`; D-020 lists the hardening left as is). Before: 2026-11-08 by Claude (security audit run-10: ~/.local/bin/herdr locked as an immutable link to the pinned binary, D-019; the remote pin guard matches `machine` anywhere). Before: 2026-11-08 by Claude (code review max fixes on fix/herdr-code-review: launchd reloads only changed agents, server as session leader D-017, crash-only restart D-016, read-only remote rule placeholder, config copied not linked, hook re-patch agent). Before: 2026-11-08 by Claude (security audit run-8 fixes on fix/herdr-audit-run8: the gate binds launchd's job to the serving process). Before: 2026-11-08 by Claude (security audit run-7 fixes on herdr/audit-run7-fixes). Before: 2026-11-08 by Claude (security audit run-6 fixes: verify-herdr never prints the owner name; D-012 purge right before exec; herdr pinned on every Mac). Before: herdr agent-detection rules bundled only, D-012; audit sandbox recorded, D-013). Before: 2026-11-07 by Claude (P8 herdr done: PR #24 merged and deployed on n0, `just verify-phase-8` passes, output below). Before: security review r3 closed out, PRs #18 to #22, grade A.
 
 ## Phases
 
@@ -12,7 +12,7 @@ Last updated: 2026-11-11 (P9 Brewfile mirror both ways deployed on n0 and book, 
 - [x] P5 Nightly Homebrew upgrade on the laptop
 - [x] P6 Repo-state pattern (PR #8)
 - [x] P8 herdr on n0 (plan docs/plans/P8-herdr.md, D-010, D-011, PR #24)
-- [ ] P9 Brewfile mirrors both Macs, both ways (plan docs/plans/P9-brew-mirror.md, D-022): built and tested, rollout open
+- [x] P9 Brewfile mirrors both Macs, both ways (plan docs/plans/P9-brew-mirror.md, D-022, PRs #38, #39)
 
 ## What is true now
 
@@ -34,8 +34,18 @@ Last updated: 2026-11-11 (P9 Brewfile mirror both ways deployed on n0 and book, 
     flutter, android-commandlinetools, cocoapods, xcodegen, and the App Store apps HDHomeRun,
     Xcode, GarageBand, iMovie). A new install on n0 is mirrored to book unless the suffix is
     added by hand.
-  - book lacked 102 Brewfile entries on 2026-11-11 (`brew bundle check` over ssh); about 85 of
-    them are not n0-only and will be installed by its first run.
+  - Rollout 2026-11-11, both first runs read from `~/Library/Logs/brew-apply.log`:
+    book lacked 102 entries (94 after the n0-only ones) and installed all but 8 in 17 minutes,
+    ClaudeGlance among them. Left on book: Keynote, Numbers, Pages (the App Store install wants
+    a password), codex (cask) and the link of pnpm (npm-global copies of both sit at
+    /opt/homebrew/bin), and four tap formulae that failed in the same batch as pnpm
+    (lightpanda, func, kn, reminders-cli; retried on the next run).
+    book's reconciler pushed 12 installs of its own; n0 installed 7 (iterm2, firefox,
+    whisper.cpp, rtk, pdftk-java, imessage-exporter, htop). Left on n0: zoom, multipass, plex
+    (password). geoip and cakebrew no longer exist in Homebrew: dropped from the Brewfile, and
+    brew-reconcile now leaves out an install Homebrew no longer carries.
+  - `brew bundle check --verbose` writes its list to stderr when stdout is not a terminal;
+    brew-apply reads both streams and trusts the exit code (PR #39, LESSONS 2026-11-11).
 - herdr (P8, D-010, D-011, docs/herdr.md): Homebrew herdr 0.9.5 installed on n0 and pinned
   (`herdr/VERSION`). Claude integration v11 installed and read first: one hook file and one
   `SessionStart` entry in `~/.claude/settings.json`. Verified live 2026-11-07 with two Claude
@@ -488,9 +498,9 @@ Open Lows, each accepted or blocked:
 
 ## Next
 
-- P9 rollout: merge the PR; on n0 run `macos/install-launchd.sh`; on book
-  `git -C ~/.dotfiles pull --ff-only` then `macos/install-launchd.sh`; read
-  `~/Library/Logs/brew-apply.log` on both after the first run, then tick P9.
+- P9 leftovers, operator at the keyboard: on n0 `brew install --cask zoom multipass plex`; on
+  book install Keynote, Numbers and Pages from the App Store and decide between the npm-global
+  codex and pnpm and Homebrew's. Then `brew-apply --force` should end in `in sync` on both.
 - Watch the next nightly backup (`LAST_RUN.json` exit 0, no "removed ... evicted" storm) and the
   first dev-pull WIP snapshot of a private repo (visibility cache in
   `~/.local/state/dev-pull/visibility`).

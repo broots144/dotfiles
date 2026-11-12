@@ -18,6 +18,7 @@ case "$*" in
   "leaves --installed-on-request") printf '%s\n' git kubernetes-cli ${LEAVES:-} ;;
   "list --cask") printf '%s\n' firefox ${CASKS:-} ;;
   "info --json=v2 --formula kubernetes-cli") echo '{"formulae":[{"full_name":"kubernetes-cli","aliases":["kubectl"],"oldnames":[]}]}' ;;
+  "info --json=v2 --formula dead-formula"|"info --cask --json=v2 dead-cask") echo "Error: No available formula" >&2; exit 1 ;;
   "info --json=v2 --formula "*) echo "{\"formulae\":[{\"full_name\":\"$4\",\"aliases\":[],\"oldnames\":[]}]}" ;;
   "info --cask --json=v2 my-cask") echo '{"casks":[{"tap":"someone/tap"}]}' ;;
   "info --cask --json=v2 "*) echo '{"casks":[{"tap":"homebrew/cask"}]}' ;;
@@ -118,6 +119,12 @@ ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$head" ]; ok git -C "$ZSH" diff --quie
 LEAVES='nmap fresh' rec
 ok grep -qx 'brew "fresh"' "$ZSH/Brewfile"; ok bash -c '! grep -q nmap "$1"' _ "$ZSH/Brewfile"
 ok [ "$(up)" = 'brew: reconcile add fresh' ]
+
+# An install Homebrew no longer carries could not be installed on the other Mac: not listed.
+head=$(git -C "$ZSH" rev-parse HEAD)
+LEAVES=dead-formula CASKS=dead-cask rec
+ok [ "$rc" = 0 ]; ok grep -q 'gone from Homebrew, not listed: dead-formula, dead-cask (cask)' <<<"$out"
+ok [ "$(git -C "$ZSH" rev-parse HEAD)" = "$head" ]; ok git -C "$ZSH" diff --quiet
 
 # A Brewfile commit an earlier run could not push goes out at the start of the next run.
 printf 'brew "offline"\n' >> "$ZSH/Brewfile"; git -C "$ZSH" commit -qam 'brew: add offline'
