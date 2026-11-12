@@ -161,6 +161,9 @@ cask "transmission" if n0
 cask "vlc"
 
 # Mac App Store
+mas "TestFlight", id: 899247664
+mas "Prime Video", id: 545519333
+mas "Developer", id: 640199958
 mas "HDHomeRun", id: 949582631 if n0
 mas "Xcode", id: 497799835 if n0
 mas "GarageBand", id: 682658836 if n0
