@@ -9,6 +9,7 @@ tap "knative/client"
 tap "broots144/tap"
 
 # CLI tools
+brew "heartleo/tap/zlib-cli"
 brew "whisper.cpp"
 brew "rtk"
 brew "pdftk-java"
