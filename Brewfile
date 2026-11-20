@@ -114,6 +114,7 @@ brew "k9s"
 brew "ansible"
 
 # Casks
+cask "utm"
 cask "zoom"
 cask "plex"
 cask "multipass"
