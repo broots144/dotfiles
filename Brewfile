@@ -119,8 +119,8 @@ cask "plex"
 cask "multipass"
 cask "iterm2"
 cask "firefox"
-cask "orcaslicer" if n0
-cask "creality-print" if n0
+cask "orcaslicer"
+cask "creality-print"
 cask "sparrow"
 cask "discord"
 cask "deskreen"
