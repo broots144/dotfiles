@@ -9,6 +9,7 @@ tap "knative/client"
 tap "broots144/tap"
 
 # CLI tools
+brew "libhdhomerun"
 brew "stripe/stripe-cli/stripe"
 brew "broots144/tap/audiobook-fetch"
 brew "heartleo/tap/zlib-cli"
